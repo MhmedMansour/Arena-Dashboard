@@ -546,4 +546,25 @@ create policy "mimar_archive_storage_delete_own"
     and position('..' in name) = 0
   );
 
+-- ----------------------------------------------------------------------------
+-- 7. جدول مزامنة لوحة تحكم Mhmed (إعدادات + سيرة ذاتية + مشاريع + تشغيل وصيانة)
+-- ----------------------------------------------------------------------------
+create table if not exists public.dashboard_sync_snapshots (
+  sync_key text primary key,
+  app_name text not null default 'Mhmed',
+  payload jsonb not null,
+  updated_at timestamptz not null default now(),
+  constraint chk_sync_key_length check (length(btrim(sync_key)) >= 8)
+);
+
+alter table public.dashboard_sync_snapshots enable row level security;
+
+drop policy if exists "mhmed_sync_rw" on public.dashboard_sync_snapshots;
+create policy "mhmed_sync_rw"
+  on public.dashboard_sync_snapshots
+  for all
+  to anon, authenticated
+  using (length(sync_key) >= 8)
+  with check (length(sync_key) >= 8);
+
 commit;
