@@ -63,10 +63,18 @@ export interface AppearanceSettings {
   reduceMotion: boolean;
 }
 
+export type NavPosition = "right" | "left" | "top";
+
 export interface WorkspacePreferences {
   defaultTab: MainTabId;
   hiddenTabs: MainTabId[];
   customDisciplines: string[];
+  /** Custom order of the main nav tabs (all MainTabId values should be present). */
+  navOrder: MainTabId[];
+  /** Per-tab icon override (icon name from the nav icon registry). */
+  navIcons: Partial<Record<MainTabId, string>>;
+  /** Layout position of the navigation rail/bar. */
+  navPosition: NavPosition;
 }
 
 export interface DashboardSettings {
