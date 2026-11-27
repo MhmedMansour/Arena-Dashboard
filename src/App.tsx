@@ -1,11 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  LayoutDashboard,
   FolderKanban,
   Files,
-  Images,
   Wrench,
-  Award,
   FolderArchive,
   UserCheck,
   Settings,
@@ -30,6 +27,7 @@ import {
   Trash2,
 } from "lucide-react";
 import SmartArchiveView from "./components/SmartArchiveView";
+import DevAssistant from "./components/DevAssistant";
 import CvProfileView from "./components/CvProfileView";
 import OmExecutionView from "./components/OmExecutionView";
 import SettingsView, { SettingsSubTab } from "./components/SettingsView";
@@ -72,22 +70,8 @@ import {
   saveWorkOrders,
   subscribeTabSync,
 } from "./services/syncService";
-
-const ALL_NAV_TABS: Array<{
-  id: MainTabId;
-  label: string;
-  icon: typeof LayoutDashboard;
-}> = [
-  { id: "overview", label: "نظرة عامة", icon: LayoutDashboard },
-  { id: "cv", label: "السيرة الذاتية والخبرات", icon: UserCheck },
-  { id: "projects", label: "المشاريع", icon: FolderKanban },
-  { id: "om", label: "التشغيل والصيانة", icon: Wrench },
-  { id: "files", label: "مكتبة الملفات", icon: Files },
-  { id: "samples", label: "عينات الأعمال", icon: Images },
-  { id: "certificates", label: "الشهادات", icon: Award },
-  { id: "archive", label: "الأرشيف الذكي", icon: FolderArchive },
-  { id: "settings", label: "الإعدادات والمزامنة", icon: Settings },
-];
+import { AssistantAction } from "./services/assistantService";
+import { buildNavTabs } from "./components/navIcons";
 
 const filesDb = new Promise<IDBDatabase>((res, rej) => {
   const r = indexedDB.open("mimar-files", 1);
@@ -437,6 +421,17 @@ export default function App() {
     setMobile(false);
   }
 
+  function handleAssistantAction(action: AssistantAction) {
+    if (action.type === "navigate") {
+      nav(action.tab, action.sub);
+    } else if (action.type === "openModal") {
+      setPid("");
+      setModal(action.modal);
+    } else if (action.type === "openSettings") {
+      nav("settings", action.sub || "assistant");
+    }
+  }
+
   async function downloadFile(f: LibraryFileItem) {
     let href = f.isBuiltinCv
       ? "./cv/Mohamed_Mansour_CV.pdf"
@@ -456,19 +451,28 @@ export default function App() {
     if (!f.art && !f.isBuiltinCv) setTimeout(() => URL.revokeObjectURL(href), 3000);
   }
 
+  const navTabs = useMemo(
+    () =>
+      buildNavTabs({
+        order: settings.workspace.navOrder,
+        iconOverrides: settings.workspace.navIcons,
+      }),
+    [settings.workspace.navOrder, settings.workspace.navIcons]
+  );
+
   const visibleTabs = useMemo(
     () =>
-      ALL_NAV_TABS.filter(
+      navTabs.filter(
         (t) =>
           t.id === "overview" ||
           t.id === "settings" ||
           !settings.workspace.hiddenTabs.includes(t.id)
       ),
-    [settings.workspace.hiddenTabs]
+    [navTabs, settings.workspace.hiddenTabs]
   );
 
   const activeTabLabel =
-    ALL_NAV_TABS.find((t) => t.id === tab)?.label || "نظرة عامة";
+    navTabs.find((t) => t.id === tab)?.label || "نظرة عامة";
 
   const rows = (list: LibraryFileItem[]) =>
     list.length ? (
@@ -550,9 +554,17 @@ export default function App() {
             : "مزامنة التبويبات نشطة";
 
   const sidebarCompact = settings.appearance.sidebarCompact;
+  const navPos = settings.workspace.navPosition || "right";
 
   return (
-    <div className={sidebarCompact ? "mh-compact-rail" : ""}>
+    <div
+      className={[
+        sidebarCompact ? "mh-compact-rail" : "",
+        `mh-nav-${navPos}`,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       {/* Sidebar */}
       <aside className={`${mobile ? "open" : ""} ${sidebarCompact ? "compact" : ""}`}>
         <button
@@ -1085,7 +1097,7 @@ export default function App() {
               onApplyImportedSnapshot={applyImportedSnapshot}
               onResetAllToCvDefaults={resetAllToCvDefaults}
               onNotify={setMsg}
-              allNavTabs={ALL_NAV_TABS.map(({ id, label }) => ({ id, label }))}
+              allNavTabs={navTabs.map(({ id, label }) => ({ id, label }))}
             />
           )}
         </article>
@@ -1216,6 +1228,9 @@ export default function App() {
                 }}
               >
                 <p>يدعم DWG وRVT وPDF وExcel والصور وكافة الصيغ الهندسية.</p>
+                <button type="button" className="mh-choice-pill" onClick={() => nav("archive")}>
+                  للتصنيف التلقائي حسب محتوى الملف: افتح الأرشيف الذكي
+                </button>
                 <input ref={input} type="file" multiple required />
                 <label>
                   التصنيف
@@ -1307,6 +1322,14 @@ export default function App() {
           </section>
         </div>
       )}
+
+      <DevAssistant
+        context={{ dashboardName: settings.dashboardName, currentTab: tab,
+          projectCount: projects.length, workOrderCount: workOrders.length,
+          fileCount: files.length, archiveCount: smartArchiveCount }}
+        onAction={handleAssistantAction}
+        onOpenSettings={() => nav("settings", "assistant")}
+      />
 
       {msg && (
         <div className="toast">

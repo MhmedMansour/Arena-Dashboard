@@ -7,6 +7,7 @@ import {
   SyncConfig,
   ThemePresetId,
 } from "../types/mhmed";
+import { DEFAULT_TAB_ORDER } from "../components/navIcons";
 
 export const DEFAULT_DISCIPLINES: string[] = [
   "AutoCAD MEP",
@@ -58,6 +59,9 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
     defaultTab: "overview",
     hiddenTabs: [],
     customDisciplines: DEFAULT_DISCIPLINES,
+    navOrder: [...DEFAULT_TAB_ORDER],
+    navIcons: {},
+    navPosition: "right",
   },
 };
 
@@ -518,8 +522,8 @@ export const DEFAULT_SYNC_CONFIG: SyncConfig = {
   autoSync: true,
   githubToken: "",
   githubGistId: "",
-  supabaseUrl: import.meta.env.VITE_SUPABASE_URL || "",
-  supabaseAnonKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "",
+  supabaseUrl: import.meta.env?.VITE_SUPABASE_URL || "",
+  supabaseAnonKey: import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY || "",
   supabaseSyncKey: "mhmed-workspace",
   lastSyncedAt: null,
   lastSyncDirection: null,

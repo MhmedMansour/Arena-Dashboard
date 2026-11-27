@@ -43,7 +43,7 @@ export interface ClassificationSuggestion {
   detectedRevision?: string;
   extractedTags: string[];
   confidenceScore: number; // 0 - 100 (heuristic rule-based)
-  analysisMethod: "heuristic-metadata" | "ai-backend";
+  analysisMethod: "heuristic-metadata" | "content-heuristic" | "ai-backend";
   analysisNote: string;
   isBinaryCadOrBim: boolean;
 }

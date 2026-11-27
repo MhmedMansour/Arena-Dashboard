@@ -1,3 +1,4 @@
+import { analyzeFileContent, mergeContentInsight } from "../services/contentClassifier";
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Upload,
@@ -194,14 +195,23 @@ export default function SmartArchiveView({
   // Stage selected files for Smart Classification review before saving
   async function handleStageFiles(fileList: FileList | File[]) {
     const arr = Array.from(fileList);
-    if (!arr.length) return;
+    if (!arr.length || stagingBusy) return;
     setStagingBusy(true);
     try {
       const currentFolders = folders.length ? folders : await archiveStorage.listFolders();
       const built: StagedUploadItem[] = [];
 
       for (const file of arr) {
-        const suggestion = await classifyFileSmart(file, projects, currentFolders);
+        const base = await classifyFileSmart(file, projects, currentFolders);
+        const content = await analyzeFileContent(file);
+        const suggestion = content ? mergeContentInsight(base, content) : {
+          ...base,
+          analysisNote: "تصنيف مبدئي من الاسم والامتداد؛ لم يُستخرج نص ذو دلالة من المحتوى (قد يكون صورة أو ملفًا ممسوحًا أو محميًا أو غير مدعوم أو تجاوز حدود القراءة). راجع التصنيف يدويًا. " + base.analysisNote,
+        };
+        // Keep folder consistent with a content-derived section, never force the old metadata folder.
+        if (content && suggestion.suggestedSection !== base.suggestedSection) {
+          suggestion.suggestedFolderId = currentFolders.find((folder) => folder.section === suggestion.suggestedSection)?.id || "";
+        }
         const matchedProj = projects.find((p) => p.id === suggestion.detectedProjectId);
 
         built.push({
@@ -688,16 +698,18 @@ export default function SmartArchiveView({
           <button
             type="button"
             className="cream sa-upload-cta"
+            disabled={stagingBusy}
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload size={16} />
-            <span>رفع وتصنيف ملفات</span>
+            <span>{stagingBusy ? "جارٍ قراءة وتجهيز الملفات…" : "رفع وتصنيف ملفات"}</span>
           </button>
           <input
             ref={fileInputRef}
             type="file"
             multiple
-            accept={ACCEPT_FILE_EXTENSIONS}
+            accept={ACCEPT_FILE_EXTENSIONS + ",text/*,.txt,.csv,.tsv,.md,.json,.xml"}
+            disabled={stagingBusy}
             style={{ display: "none" }}
             onChange={(e) => e.target.files && handleStageFiles(e.target.files)}
           />
@@ -801,17 +813,23 @@ export default function SmartArchiveView({
             handleStageFiles(e.dataTransfer.files);
           }
         }}
+        role="button"
+        tabIndex={0}
+        aria-busy={stagingBusy}
+        aria-label="رفع ملفات للتصنيف حسب المحتوى"
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInputRef.current?.click(); } }}
         onClick={() => fileInputRef.current?.click()}
       >
         <div className="sa-dropzone-icon">
           <Upload size={22} />
         </div>
         <div className="sa-dropzone-text">
-          <b>اسحب وأفلت الملفات الهندسية والمكتبية هنا، أو انقر للاختيار</b>
+          <b role="status">{stagingBusy ? "جارٍ تجهيز الملفات وقراءة النص محليًا، انتظر قليلًا…" : "اسحب وأفلت الملفات الهندسية والمكتبية هنا، أو انقر للاختيار"}</b>
           <small>
             الصيغ المدعومة: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX · DWG, DXF, DWT, DWS · RVT, RFA,
             RTE, IFC · NWC, NWD, DWF, DWFx · JPG, PNG, TIFF, SVG
           </small>
+          <small>التصنيف حسب النص داخل PDF وDOCX وXLSX وPPTX والملفات النصية. الصور والمستندات الممسوحة تحتاج قراءة ضوئية خارجية؛ CAD/Revit الثنائي يحتاج أداة متخصصة.</small>
         </div>
         <span className="sa-pill">تصنيف ذكي + مراجعة يدوية قبل الحفظ</span>
       </section>
@@ -864,8 +882,8 @@ export default function SmartArchiveView({
                     <div>
                       <b>{item.file.name}</b>
                       <small>
-                        {item.suggestion.fileTypeLabel} · {formatFileSize(item.file.size)} · دقة
-                        الاقتراح القاعدي {item.suggestion.confidenceScore}%
+                        {item.suggestion.fileTypeLabel} · {formatFileSize(item.file.size)} · تقدير ثقة
+                        الاقتراح {item.suggestion.confidenceScore}%
                       </small>
                     </div>
                   </div>
@@ -907,7 +925,7 @@ export default function SmartArchiveView({
                   ) : (
                     <Info size={14} />
                   )}
-                  <span>{item.suggestion.analysisNote}</span>
+                  <span><b>{item.suggestion.analysisMethod === "content-heuristic" ? "تحليل المحتوى: " : item.suggestion.analysisMethod === "ai-backend" ? "تحليل الخادم: " : "الاسم والامتداد: "}</b>{item.suggestion.analysisNote}</span>
                 </div>
 
                 <div className="sa-staged-grid">

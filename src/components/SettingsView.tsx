@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Palette,
   UserCircle2,
@@ -38,6 +38,8 @@ import {
   SyncState,
 } from "../types/mhmed";
 import { DEFAULT_SETTINGS, THEME_PRESETS } from "../data/mhmedSeedData";
+import NavigationSettings from "./NavigationSettings";
+import AssistantSettings from "./AssistantSettings";
 import { BrandMark, ProfileAvatar } from "./ProfileAvatar";
 import {
   compressImageFile,
@@ -53,7 +55,8 @@ export type SettingsSubTab =
   | "profile"
   | "appearance"
   | "workspace"
-  | "sync";
+  | "sync"
+  | "assistant";
 
 interface SettingsViewProps {
   initialSection?: SettingsSubTab;
@@ -125,6 +128,7 @@ export default function SettingsView({
   allNavTabs,
 }: SettingsViewProps) {
   const [subTab, setSubTab] = useState<SettingsSubTab>(initialSection);
+  useEffect(() => setSubTab(initialSection), [initialSection]);
   const [newDiscipline, setNewDiscipline] = useState("");
   const [portableCodeInput, setPortableCodeInput] = useState("");
   const [showSql, setShowSql] = useState(false);
@@ -242,6 +246,7 @@ export default function SettingsView({
     { id: "profile", label: "البروفايل والصورة", icon: UserCircle2 },
     { id: "appearance", label: "المظهر والألوان", icon: Palette },
     { id: "workspace", label: "الأقسام والواجهة", icon: LayoutGrid },
+    { id: "assistant", label: "مساعد التطوير", icon: Sparkles },
     { id: "sync", label: "المزامنة والنسخ", icon: Cloud },
   ];
 
@@ -736,6 +741,8 @@ export default function SettingsView({
             </div>
           </div>
 
+          <NavigationSettings workspace={settings.workspace} onChange={setWorkspace} />
+
           <h4 className="mh-small-head">عناصر الواجهة الرئيسية</h4>
           <div className="mh-toggles-grid">
             <label className="mh-toggle-row">
@@ -865,6 +872,8 @@ export default function SettingsView({
           </div>
         </section>
       )}
+
+      {subTab === "assistant" && <AssistantSettings onNotify={onNotify} />}
 
       {/* 5. CLOUD SYNC & BACKUP */}
       {subTab === "sync" && (
