@@ -3042,3 +3042,70 @@ article {
     display: none;
   }
 }
+
+/* Compact, Samsung-inspired month widget at the RTL start of the dashboard. */
+.mh-overview-top {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 18px;
+}
+.mh-overview-top.no-calendar { grid-template-columns: minmax(0, 1fr); }
+.mh-overview-top > .hero { min-width: 0; }
+.mh-overview-top:not(.no-calendar) .mh-hero-content { max-width: 78%; }
+.mh-calendar-widget { border-radius: 24px; padding: 17px; min-width: 0; }
+.mh-calendar-widget .mh-panel-title { align-items: center; gap: 6px; }
+.mh-calendar-widget .mh-panel-title h3 { font-size: 16px; margin-top: 2px; }
+.mh-calendar-widget .mh-btn-row { gap: 2px; flex-wrap: nowrap; }
+.mh-calendar-widget .mh-btn-row button { padding: 6px; }
+.mh-calendar-widget .mh-cal-mini-grid { gap: 2px; }
+.mh-calendar-widget .mh-cal-wd { font-size: 9px; padding: 3px 0 5px; }
+.mh-calendar-widget .mh-cal-cell.mini {
+  min-height: 29px;
+  height: 29px;
+  width: 29px;
+  justify-self: center;
+  gap: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  padding: 2px;
+  font-size: 12px;
+}
+.mh-calendar-widget .mh-cal-cell.today { outline: 1px solid var(--accent); outline-offset: -2px; }
+.mh-calendar-widget .mh-cal-cell.selected { background: var(--accent); color: var(--accent-ink, #fff); box-shadow: none; }
+.mh-calendar-widget .mh-cal-cell:hover:not(.selected) { background: var(--plate); }
+.mh-calendar-widget .mh-cal-dot { width: 3px; height: 3px; margin: 0; position: absolute; bottom: 2px; }
+.mh-calendar-widget .selected .mh-cal-dot { background: currentColor; }
+.mh-calendar-widget-footer { display: flex; align-items: center; justify-content: space-between; margin: 7px 0; color: var(--muted); }
+.mh-calendar-widget-footer small { font-size: 10px; }
+.mh-calendar-widget-footer button { font-size: 10px; padding: 3px 9px; border-radius: 20px; }
+.mh-work-schedule { display: flex; align-items: center; gap: 9px; padding: 11px; margin: 10px 0; border-radius: 14px; background: color-mix(in srgb, var(--accent) 9%, var(--inset)); border-inline-start: 3px solid var(--accent); }
+.mh-work-schedule > svg { color: var(--accent); flex-shrink: 0; }
+.mh-work-schedule div { display: grid; gap: 2px; }
+.mh-work-schedule b { font-size: 12px; }
+.mh-work-schedule span { font-size: 11px; }
+.mh-work-schedule > small { margin-inline-start: auto; text-align: end; font-size: 9px; color: var(--muted); }
+.mh-calendar-day-link { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 4px; font-size: 10px; color: var(--muted); padding-top: 2px; }
+.mh-calendar-day-link:hover { color: var(--accent); }
+.mh-cv-project-files { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-soft); }
+.mh-cv-project-files > .mh-flex-between { flex-wrap: wrap; gap: 8px; }
+.mh-cv-project-files b { font-size: 12px; }
+.mh-project-files-hint { display: block; color: var(--muted); font-size: 10px; line-height: 1.8; margin-top: 7px; }
+.mh-project-file-list { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 6px; }
+.mh-project-file-list li { display: flex; align-items: center; gap: 7px; background: var(--inset); padding: 8px; border-radius: 9px; min-width: 0; flex-wrap: wrap; }
+.mh-project-file-name { flex: 1; min-width: 65px; display: grid; gap: 2px; }
+.mh-project-file-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.mh-project-file-name small { font-size: 9px; color: var(--muted); }
+.mh-project-file-list .mh-btn-row { gap: 2px; }
+.mh-project-file-list button { padding: 5px; }
+.mh-cv-project-files button:disabled { opacity: .5; cursor: wait; }
+@media (max-width: 1000px) {
+  .mh-overview-top { grid-template-columns: 280px minmax(0, 1fr); }
+  .mh-overview-top:not(.no-calendar) .mh-hero-content { max-width: 100%; }
+  .mh-overview-top:not(.no-calendar) .blueprint { opacity: .15; }
+}
+@media (max-width: 760px) {
+  .mh-overview-top { grid-template-columns: minmax(0, 1fr); }
+  .mh-calendar-widget { width: min(100%, 320px); justify-self: start; }
+}

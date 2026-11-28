@@ -82,6 +82,16 @@ function getFileDateKey(f: LibraryFileItem): string {
   return toDateKey(new Date(f.date || Date.now()));
 }
 
+export function WorkSchedule() {
+  return (
+    <div className="mh-work-schedule" aria-label="دوام الحرم من ٩ صباحاً إلى ٥ مساءً">
+      <Clock size={17} />
+      <div><b>دوام الحرم</b><span>٩ صباحًا — ٥ مساءً</span></div>
+      <small>٨ ساعات<br />بتوقيت السعودية</small>
+    </div>
+  );
+}
+
 export function OverviewMonthCalendarCard({
   activeMonth,
   onChangeMonth,
@@ -125,16 +135,17 @@ export function OverviewMonthCalendarCard({
   ).length;
 
   return (
-    <section className="mh-panel mh-quick-card">
+    <section className="mh-panel mh-quick-card mh-calendar-widget" aria-label="التقويم الشهري المصغر">
       <div className="mh-panel-title" style={{ marginBottom: 10 }}>
         <div>
-          <small className="eyebrow">MONTHLY CALENDAR · التقويم المرتبط بالشهر</small>
-          <h3>جدول شهر {formatMonthArabic(activeMonth)}</h3>
+          <small className="eyebrow">تقويمي</small>
+          <h3>{formatMonthArabic(activeMonth)}</h3>
         </div>
         <div className="mh-btn-row">
           <button
             type="button"
             className="sa-btn-subtle"
+            aria-label="الشهر السابق"
             title="الشهر السابق"
             onClick={() => onChangeMonth(shiftMonthKey(activeMonth, -1))}
           >
@@ -143,6 +154,7 @@ export function OverviewMonthCalendarCard({
           <button
             type="button"
             className="sa-btn-subtle"
+            aria-label="الشهر التالي"
             title="الشهر التالي"
             onClick={() => onChangeMonth(shiftMonthKey(activeMonth, 1))}
           >
@@ -152,8 +164,9 @@ export function OverviewMonthCalendarCard({
             type="button"
             className="sa-btn-subtle active"
             onClick={onOpenCalendar}
+            aria-label="فتح التقويم الكامل" title="فتح التقويم الكامل"
           >
-            التقويم الكامل <ChevronLeft size={14} />
+            <CalendarDays size={15} />
           </button>
         </div>
       </div>
@@ -177,6 +190,9 @@ export function OverviewMonthCalendarCard({
               className={`mh-cal-cell mini ${!inMonth ? "outside" : ""} ${
                 isSelected ? "selected" : isToday ? "today" : ""
               }`}
+              aria-label={`${formatDateArabic(key)}${count ? `، ${count} بنود` : ""}`}
+              aria-pressed={isSelected}
+              aria-current={isToday ? "date" : undefined}
               onClick={() => {
                 if (!inMonth) {
                   onChangeMonth(toMonthKey(d.getFullYear(), d.getMonth()));
@@ -191,11 +207,17 @@ export function OverviewMonthCalendarCard({
         })}
       </div>
 
-      <div className="mh-badges-row" style={{ marginTop: 10 }}>
-        <span className="mh-pill accent">{monthEventCount} مواعيد ومهام</span>
-        <span className="mh-pill">{monthWoCount} أوامر O&M</span>
-        <span className="mh-pill ok">{monthProjCount} تسليمات مشاريع</span>
+      <div className="mh-calendar-widget-footer">
+        <button type="button" className="sa-btn-subtle" onClick={() => {
+          onChangeMonth(todayMonthKey());
+          onSelectDate(today);
+        }}>اليوم</button>
+        <small>{monthEventCount + monthWoCount + monthProjCount} بنود هذا الشهر</small>
       </div>
+      <WorkSchedule />
+      <button type="button" className="mh-calendar-day-link" onClick={onOpenCalendar}>
+        {formatDateArabic(selectedDate)} <ChevronLeft size={14} />
+      </button>
     </section>
   );
 }
@@ -838,6 +860,8 @@ export default function MonthlyCalendarView({
             <small dir="ltr" style={{ textAlign: "right", marginBottom: 12 }}>
               {selectedDate} · مرتبط بشهر {formatMonthArabic(activeMonth)}
             </small>
+
+            <WorkSchedule />
 
             {/* Quick Add Form for Selected Day */}
             <form
