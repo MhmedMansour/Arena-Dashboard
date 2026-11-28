@@ -1,5 +1,6 @@
 export type MainTabId =
   | "overview"
+  | "calendar"
   | "cv"
   | "projects"
   | "om"
@@ -60,6 +61,7 @@ export interface AppearanceSettings {
   showStats: boolean;
   showQuickCvCard: boolean;
   showQuickOmCard: boolean;
+  showQuickCalendarCard: boolean;
   reduceMotion: boolean;
 }
 
@@ -73,6 +75,8 @@ export interface WorkspacePreferences {
   navOrder: MainTabId[];
   /** Per-tab icon override (icon name from the nav icon registry). */
   navIcons: Partial<Record<MainTabId, string>>;
+  /** Per-tab custom Arabic label override. */
+  navLabels?: Partial<Record<MainTabId, string>>;
   /** Layout position of the navigation rail/bar. */
   navPosition: NavPosition;
 }
@@ -134,6 +138,7 @@ export interface CvCertification {
   issuer: string;
   year: string;
   category: string;
+  selectedForDisplay?: boolean;
 }
 
 export interface CvProfileData {
@@ -171,6 +176,10 @@ export interface ProjectItem {
   art: number;
   notes?: string;
   updatedAt?: number;
+  /** Target or milestone date YYYY-MM-DD (links project to Monthly Calendar) */
+  targetDate?: string;
+  /** Whether project is included in curated Portfolio Showcase / Share */
+  selectedForDisplay?: boolean;
 }
 
 export interface LibraryFileItem {
@@ -182,6 +191,16 @@ export interface LibraryFileItem {
   date: number;
   art?: number;
   isBuiltinCv?: boolean;
+  /** Optional archive file id when promoted from Smart Archive */
+  archiveFileId?: string;
+  mimeType?: string;
+  notes?: string;
+  /** Associated calendar date YYYY-MM-DD (links file/sample to Monthly Calendar) */
+  dueDate?: string;
+  /** Whether this sample/file is chosen to be displayed in Showcase & Share */
+  selectedForDisplay?: boolean;
+  /** Display order for curated work samples */
+  displayOrder?: number;
 }
 
 export type OmSystemType =
@@ -213,6 +232,26 @@ export interface OmWorkOrder {
   notes: string;
 }
 
+export type CalendarEventCategory =
+  | "تسليم مخططات CAD/BIM"
+  | "تشغيل وصيانة دورية"
+  | "معاينة واستلام موقع"
+  | "اجتماع وتنسيق فني"
+  | "مهمة عامة";
+
+export interface CalendarEventItem {
+  id: string;
+  title: string;
+  /** YYYY-MM-DD — binds event to both day and month (date.slice(0, 7)) */
+  date: string;
+  time?: string;
+  category: CalendarEventCategory;
+  priority: OmPriority;
+  done: boolean;
+  projectId?: string;
+  notes?: string;
+}
+
 export type SyncProvider = "local" | "github-gist" | "supabase";
 export type SyncState = "idle" | "syncing" | "synced" | "dirty" | "error";
 
@@ -237,4 +276,7 @@ export interface MhmedSyncSnapshot {
   cv: CvProfileData;
   projects: ProjectItem[];
   workOrders: OmWorkOrder[];
+  calendarEvents?: CalendarEventItem[];
+  libraryFiles?: LibraryFileItem[];
+  activeMonth?: string;
 }

@@ -28,11 +28,10 @@ import {
   ShieldCheck,
   Filter,
   Calendar,
-  ExternalLink,
-  ZoomIn,
-  ZoomOut,
   RefreshCw,
   Info,
+  RotateCcw,
+  Star,
 } from "lucide-react";
 import {
   AiBackendConfig,
@@ -62,17 +61,15 @@ import {
   saveAiBackendConfig,
   saveExternalViewerConfig,
 } from "../services/archiveAiService";
-import {
-  DxfPreviewData,
-  IfcHeaderInspection,
-  inspectIfcStepMetadata,
-  parseAsciiDxfPreview,
-} from "../utils/dxfPreview";
+import UniversalFilePreviewModal, {
+  PreviewTarget,
+} from "./UniversalFilePreviewModal";
 
 interface SmartArchiveViewProps {
   projects: ExistingProjectRef[];
   onNotify: (msg: string) => void;
   onArchiveCountChange?: (count: number) => void;
+  onPromoteToSample?: (meta: ArchiveFileMetadata, blob: Blob) => void;
 }
 
 type DateFilterPreset = "all" | "today" | "7days" | "30days" | "custom";
@@ -91,6 +88,7 @@ export default function SmartArchiveView({
   projects,
   onNotify,
   onArchiveCountChange,
+  onPromoteToSample,
 }: SmartArchiveViewProps) {
   const [files, setFiles] = useState<ArchiveFileMetadata[]>([]);
   const [folders, setFolders] = useState<ArchiveFolder[]>([]);
@@ -115,15 +113,11 @@ export default function SmartArchiveView({
 
   // Active modals / drawers
   const [selectedFile, setSelectedFile] = useState<ArchiveFileMetadata | null>(null);
-  const [previewFile, setPreviewFile] = useState<ArchiveFileMetadata | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string>("");
-  const [dxfPreview, setDxfPreview] = useState<DxfPreviewData | null>(null);
-  const [ifcInspection, setIfcInspection] = useState<IfcHeaderInspection | null>(null);
-  const [previewZoom, setPreviewZoom] = useState<number>(1);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
 
-  // Folder creation modal
+  // Folder creation & editing modal
   const [showFolderModal, setShowFolderModal] = useState(false);
+  const [editingFolder, setEditingFolder] = useState<ArchiveFolder | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderSection, setNewFolderSection] = useState(DEFAULT_ARCHIVE_SECTIONS[0]);
   const [customSectionInput, setCustomSectionInput] = useState("");
@@ -142,6 +136,9 @@ export default function SmartArchiveView({
   const [editDiscipline, setEditDiscipline] = useState<EngineeringDiscipline>("عام / متعدد التخصصات");
   const [editDocDate, setEditDocDate] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  const [editTags, setEditTags] = useState("");
+  const [editDrawingCode, setEditDrawingCode] = useState("");
+  const [editRevision, setEditRevision] = useState("");
 
   // AI & Viewer Integration Settings Modal
   const [showIntegrationModal, setShowIntegrationModal] = useState(false);
@@ -173,13 +170,6 @@ export default function SmartArchiveView({
   useEffect(() => {
     refreshArchive();
   }, []);
-
-  // Cleanup Blob object URL when preview closes
-  useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [previewUrl]);
 
   const allSections = useMemo(() => {
     const set = new Set<string>(DEFAULT_ARCHIVE_SECTIONS);
@@ -383,11 +373,45 @@ export default function SmartArchiveView({
   }
 
   async function handleDeleteFolder(folder: ArchiveFolder) {
-    if (folder.isSystem) return;
     await archiveStorage.deleteFolder(folder.id);
     if (activeFolderId === folder.id) setActiveFolderId("all");
     await refreshArchive();
     onNotify(`تم حذف المجلد "${folder.name}" مع الاحتفاظ بملفاته في الأرشيف العام`);
+  }
+
+  async function handleSaveFolderEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingFolder || !newFolderName.trim()) return;
+    const targetSection =
+      newFolderSection === "__custom__" && customSectionInput.trim()
+        ? customSectionInput.trim()
+        : newFolderSection;
+    await archiveStorage.saveFolder({
+      ...editingFolder,
+      name: newFolderName.trim(),
+      section: targetSection,
+    });
+    setEditingFolder(null);
+    setNewFolderName("");
+    setCustomSectionInput("");
+    await refreshArchive();
+    onNotify("تم حفظ تعديلات المجلد");
+  }
+
+  async function handleRestoreDefaultFolders() {
+    await archiveStorage.restoreDefaultFolders();
+    await refreshArchive();
+    onNotify("تم استعادة المجلدات الافتراضية للأرشيف");
+  }
+
+  async function handlePromoteFileToSamples(meta: ArchiveFileMetadata) {
+    if (!onPromoteToSample) return;
+    const blob = await archiveStorage.getFileBlob(meta.id);
+    if (!blob) {
+      onNotify("تعذر قراءة محتوى الملف لإضافته للعينات");
+      return;
+    }
+    onPromoteToSample(meta, blob);
   }
 
   async function handleDownloadOriginal(meta: ArchiveFileMetadata) {
@@ -409,64 +433,35 @@ export default function SmartArchiveView({
   }
 
   async function handleOpenPreview(meta: ArchiveFileMetadata) {
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl("");
-    }
-    setDxfPreview(null);
-    setIfcInspection(null);
-    setPreviewZoom(1);
-    setPreviewFile(meta);
-    setPreviewLoading(true);
-
     try {
       const blob = await archiveStorage.getFileBlob(meta.id);
       if (!blob) {
         onNotify("محتوى الملف غير متوفر في المتصفح الحالي");
-        setPreviewLoading(false);
         return;
       }
-
-      const ext = meta.extension.toUpperCase();
-      if (
-        ext === "PDF" ||
-        ext === "JPG" ||
-        ext === "PNG" ||
-        ext === "SVG" ||
-        ext === "TIFF"
-      ) {
-        const mimeMap: Record<string, string> = {
-          PDF: "application/pdf",
-          JPG: "image/jpeg",
-          PNG: "image/png",
-          SVG: "image/svg+xml",
-          TIFF: "image/tiff",
-        };
-        const typedBlob =
-          blob.type && blob.type !== "application/octet-stream"
-            ? blob
-            : new Blob([blob], { type: mimeMap[ext] || blob.type });
-        setPreviewUrl(URL.createObjectURL(typedBlob));
-      } else if (ext === "DXF") {
-        const parsed = await parseAsciiDxfPreview(blob);
-        setDxfPreview(parsed);
-      } else if (ext === "IFC") {
-        const info = await inspectIfcStepMetadata(blob);
-        setIfcInspection(info);
-      }
+      setPreviewTarget({
+        id: meta.id,
+        name: meta.name,
+        blob,
+        size: meta.size,
+        category: `${meta.section} · ${meta.discipline}`,
+        projectName: meta.projectName,
+        notes: meta.notes,
+        addedAt: meta.addedAt,
+      });
     } catch {
       onNotify("تعذر تجهيز معاينة الملف");
-    } finally {
-      setPreviewLoading(false);
     }
   }
 
-  function closePreview() {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl("");
-    setPreviewFile(null);
-    setDxfPreview(null);
-    setIfcInspection(null);
+  function handlePreviewStaged(item: StagedUploadItem) {
+    setPreviewTarget({
+      id: item.tempId,
+      name: item.customName || item.file.name,
+      blob: item.file,
+      size: item.file.size,
+      category: `${item.section} · معاينة قبل الاعتماد`,
+    });
   }
 
   function openFileDetails(meta: ArchiveFileMetadata) {
@@ -481,6 +476,9 @@ export default function SmartArchiveView({
     setEditDiscipline(meta.discipline);
     setEditDocDate(meta.documentDate);
     setEditNotes(meta.notes);
+    setEditTags((meta.tags || []).join("، "));
+    setEditDrawingCode(meta.drawingCode || "");
+    setEditRevision(meta.revision || "");
     setLinkTargetId("");
   }
 
@@ -520,6 +518,10 @@ export default function SmartArchiveView({
   async function handleSaveClassificationEdit() {
     if (!selectedFile) return;
     const matchedProj = projects.find((p) => p.id === editProjectId);
+    const parsedTags = editTags
+      .split(/[,،]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
     const updated = await archiveStorage.updateMetadata(selectedFile.id, {
       category: editCategory.trim() || selectedFile.category,
       projectId: editProjectId,
@@ -527,6 +529,9 @@ export default function SmartArchiveView({
       discipline: editDiscipline,
       documentDate: editDocDate || selectedFile.documentDate,
       notes: editNotes.trim(),
+      tags: parsedTags,
+      drawingCode: editDrawingCode.trim() || undefined,
+      revision: editRevision.trim() || undefined,
     });
     if (updated) {
       setSelectedFile(updated);
@@ -560,7 +565,7 @@ export default function SmartArchiveView({
   async function handleDeleteArchiveFile(meta: ArchiveFileMetadata) {
     await archiveStorage.deleteFile(meta.id);
     if (selectedFile?.id === meta.id) setSelectedFile(null);
-    if (previewFile?.id === meta.id) closePreview();
+    if (previewTarget?.id === meta.id) setPreviewTarget(null);
     await refreshArchive();
     onNotify(`تم حذف "${meta.name}" من الأرشيف المحلي`);
   }
@@ -889,6 +894,14 @@ export default function SmartArchiveView({
                   </div>
                   <div className="sa-staged-top-actions">
                     <span className="sa-ext-badge">{item.suggestion.extension}</span>
+                    <button
+                      type="button"
+                      className="sa-btn-subtle active"
+                      onClick={() => handlePreviewStaged(item)}
+                      title="معاينة الملف مباشرة قبل حفظه في الأرشيف"
+                    >
+                      <Eye size={14} /> معاينة فورية
+                    </button>
                     {aiConfig.enabled && (
                       <button
                         type="button"
@@ -1127,13 +1140,22 @@ export default function SmartArchiveView({
         <div className="sa-folders-panel">
           <div className="sa-panel-head">
             <b>الأقسام والمجلدات</b>
-            <button
-              type="button"
-              title="إضافة مجلد مخصص"
-              onClick={() => setShowFolderModal(true)}
-            >
-              <FolderPlus size={16} />
-            </button>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button
+                type="button"
+                title="استعادة المجلدات الافتراضية"
+                onClick={handleRestoreDefaultFolders}
+              >
+                <RotateCcw size={14} />
+              </button>
+              <button
+                type="button"
+                title="إضافة مجلد مخصص"
+                onClick={() => setShowFolderModal(true)}
+              >
+                <FolderPlus size={16} />
+              </button>
+            </div>
           </div>
 
           <button
@@ -1188,16 +1210,27 @@ export default function SmartArchiveView({
                         <span>{fld.name}</span>
                         <em>{fldCount}</em>
                       </button>
-                      {!fld.isSystem && (
-                        <button
-                          type="button"
-                          className="sa-del-folder"
-                          title="حذف المجلد المخصص"
-                          onClick={() => handleDeleteFolder(fld)}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className="sa-del-folder"
+                        title="تعديل المجلد"
+                        onClick={() => {
+                          setEditingFolder(fld);
+                          setNewFolderName(fld.name);
+                          setNewFolderSection(fld.section);
+                          setCustomSectionInput("");
+                        }}
+                      >
+                        <Edit3 size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        className="sa-del-folder"
+                        title="حذف المجلد"
+                        onClick={() => handleDeleteFolder(fld)}
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
                   );
                 })}
@@ -1493,6 +1526,15 @@ export default function SmartArchiveView({
               >
                 <Link2 size={15} /> ربط ملف ذي علاقة
               </button>
+              {onPromoteToSample && (
+                <button
+                  type="button"
+                  className="sa-btn-subtle active"
+                  onClick={() => handlePromoteFileToSamples(selectedFile)}
+                >
+                  <Star size={14} /> إضافة لعينات الأعمال المعروضة
+                </button>
+              )}
             </div>
 
             {/* Sub-panels for Rename / Move / Edit / Link */}
@@ -1609,6 +1651,32 @@ export default function SmartArchiveView({
                     type="date"
                     value={editDocDate}
                     onChange={(e) => setEditDocDate(e.target.value)}
+                  />
+                </label>
+                <label>
+                  كود المخطط (اختياري)
+                  <input
+                    dir="ltr"
+                    value={editDrawingCode}
+                    onChange={(e) => setEditDrawingCode(e.target.value)}
+                    placeholder="MEP-HVAC-101"
+                  />
+                </label>
+                <label>
+                  الإصدار / المراجعة (اختياري)
+                  <input
+                    dir="ltr"
+                    value={editRevision}
+                    onChange={(e) => setEditRevision(e.target.value)}
+                    placeholder="R02"
+                  />
+                </label>
+                <label>
+                  الوسوم (مفصولة بفاصلة)
+                  <input
+                    value={editTags}
+                    onChange={(e) => setEditTags(e.target.value)}
+                    placeholder="تكييف، مستشفى، مخطط تنفيذي"
                   />
                 </label>
                 <label>
@@ -1775,277 +1843,64 @@ export default function SmartArchiveView({
         </div>
       )}
 
-      {/* Universal File & CAD/BIM Preview Modal */}
-      {previewFile && (
-        <div className="overlay" onClick={closePreview}>
+      {/* Universal File & CAD/BIM/Office Preview Modal */}
+      <UniversalFilePreviewModal
+        target={previewTarget}
+        onClose={() => setPreviewTarget(null)}
+        externalViewer={viewerConfig}
+      />
+
+      {/* Edit Folder Modal */}
+      {editingFolder && (
+        <div className="overlay" onClick={() => setEditingFolder(null)}>
           <section
-            className="dialog sa-preview-dialog"
+            className="dialog"
             role="dialog"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="sa-preview-header">
-              <div>
-                <small className="eyebrow">
-                  {previewFile.extension} PREVIEW · READ-ONLY ORIGINAL
-                </small>
-                <h2>{previewFile.name}</h2>
-              </div>
-              <div className="sa-preview-controls">
-                {(previewFile.fileGroup === "image" || dxfPreview?.bounds) && (
-                  <>
-                    <button
-                      type="button"
-                      className="sa-btn-subtle"
-                      onClick={() =>
-                        setPreviewZoom((z) => Math.max(0.4, +(z - 0.25).toFixed(2)))
-                      }
-                    >
-                      <ZoomOut size={15} />
-                    </button>
-                    <span className="sa-pill">{Math.round(previewZoom * 100)}%</span>
-                    <button
-                      type="button"
-                      className="sa-btn-subtle"
-                      onClick={() =>
-                        setPreviewZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))
-                      }
-                    >
-                      <ZoomIn size={15} />
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  className="sa-btn-subtle"
-                  onClick={() => handleDownloadOriginal(previewFile)}
+            <button
+              type="button"
+              className="close"
+              onClick={() => setEditingFolder(null)}
+            >
+              <X />
+            </button>
+            <h2>تعديل المجلد</h2>
+            <form onSubmit={handleSaveFolderEdit}>
+              <label>
+                القسم الرئيسي
+                <select
+                  value={newFolderSection}
+                  onChange={(e) => setNewFolderSection(e.target.value)}
                 >
-                  <Download size={15} /> تنزيل الأصلي
-                </button>
-                <button type="button" onClick={closePreview}>
-                  <X />
-                </button>
-              </div>
-            </div>
-
-            <div className="sa-preview-stage">
-              {previewLoading ? (
-                <p className="empty">جارٍ تحضير المعاينة الآمنة دون تعديل الملف الأصلي…</p>
-              ) : previewFile.extension === "PDF" && previewUrl ? (
-                <iframe
-                  src={previewUrl}
-                  title={previewFile.name}
-                  className="sa-pdf-frame"
-                />
-              ) : ["JPG", "PNG", "SVG"].includes(previewFile.extension) &&
-                previewUrl ? (
-                <div className="sa-image-canvas">
-                  <img
-                    src={previewUrl}
-                    alt={previewFile.name}
-                    style={{ transform: `scale(${previewZoom})` }}
+                  {allSections.map((sec) => (
+                    <option key={sec} value={sec}>
+                      {sec}
+                    </option>
+                  ))}
+                  <option value="__custom__">+ قسم جديد…</option>
+                </select>
+              </label>
+              {newFolderSection === "__custom__" && (
+                <label>
+                  اسم القسم الجديد
+                  <input
+                    required
+                    value={customSectionInput}
+                    onChange={(e) => setCustomSectionInput(e.target.value)}
                   />
-                </div>
-              ) : previewFile.extension === "TIFF" && previewUrl ? (
-                <div className="sa-cad-fallback">
-                  <img
-                    src={previewUrl}
-                    alt={previewFile.name}
-                    style={{
-                      maxWidth: "100%",
-                      maxHeight: 360,
-                      transform: `scale(${previewZoom})`,
-                    }}
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).style.display = "none";
-                    }}
-                  />
-                  <small>
-                    ملاحظة: بعض المتصفحات تعرض صور TIFF مباشرة بينما تتطلب متصفحات أخرى
-                    تنزيل الملف لفتحه بعارض الصور المكتبي. النسخة الأصلية محفوظة بالكامل.
-                  </small>
-                </div>
-              ) : previewFile.extension === "DXF" && dxfPreview ? (
-                dxfPreview.bounds &&
-                (dxfPreview.lines.length > 0 || dxfPreview.circles.length > 0) ? (
-                  <div className="sa-dxf-viewer">
-                    <div className="sa-dxf-bar">
-                      <span>
-                        معاينة خطوط DXF ثنائية الأبعاد (للقراءة فقط) · العناصر:{" "}
-                        {dxfPreview.lines.length + dxfPreview.circles.length} · الطبقات (
-                        {dxfPreview.layers.length}): {dxfPreview.layers.slice(0, 6).join("، ")}
-                      </span>
-                    </div>
-                    <div className="sa-dxf-canvas">
-                      {(() => {
-                        const b = dxfPreview.bounds!;
-                        const w = Math.max(b.maxX - b.minX, 1);
-                        const h = Math.max(b.maxY - b.minY, 1);
-                        const pad = Math.max(w, h) * 0.06;
-                        const vbX = b.minX - pad;
-                        const vbY = -(b.maxY + pad);
-                        const vbW = w + pad * 2;
-                        const vbH = h + pad * 2;
-                        const strokeW = Math.max(vbW, vbH) * 0.0022;
-
-                        return (
-                          <svg
-                            viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
-                            style={{
-                              width: `${100 * previewZoom}%`,
-                              height: `${100 * previewZoom}%`,
-                            }}
-                          >
-                            {dxfPreview.lines.map((ln, idx) => (
-                              <line
-                                key={idx}
-                                x1={ln.x1}
-                                y1={-ln.y1}
-                                x2={ln.x2}
-                                y2={-ln.y2}
-                                stroke="#f5a16b"
-                                strokeWidth={strokeW}
-                                strokeLinecap="round"
-                              />
-                            ))}
-                            {dxfPreview.circles.map((c, idx) => (
-                              <circle
-                                key={`c-${idx}`}
-                                cx={c.cx}
-                                cy={-c.cy}
-                                r={c.r}
-                                fill="none"
-                                stroke="#8fd3e8"
-                                strokeWidth={strokeW}
-                              />
-                            ))}
-                          </svg>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="sa-cad-fallback">
-                    <Compass size={38} className="sa-copper-icon" />
-                    <h3>ملف مخطط DXF</h3>
-                    <p>{dxfPreview.note || "يتطلب هذا المخطط عارض CAD متخصصًا."}</p>
-                    {viewerConfig.enabled && viewerConfig.viewerUrlTemplate && (
-                      <a
-                        href={viewerConfig.viewerUrlTemplate.replace(
-                          "{fileName}",
-                          encodeURIComponent(previewFile.name)
-                        )}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="primary"
-                      >
-                        <ExternalLink size={15} /> فتح في {viewerConfig.viewerName}
-                      </a>
-                    )}
-                  </div>
-                )
-              ) : previewFile.extension === "IFC" && ifcInspection ? (
-                <div className="sa-cad-fallback">
-                  <Box size={38} className="sa-copper-icon" />
-                  <h3>نموذج OpenBIM قياسي ({ifcInspection.schema})</h3>
-                  <p>
-                    تم فحص ترويسة ملف STEP النصية دون المساس بالملف الأصلي
-                    {ifcInspection.authoringApp
-                      ? ` · برنامج الإنشاء: ${ifcInspection.authoringApp}`
-                      : ""}
-                    .
-                  </p>
-                  {ifcInspection.elementCounts.length > 0 && (
-                    <div className="sa-ifc-counts">
-                      {ifcInspection.elementCounts.map((el) => (
-                        <div key={el.label} className="sa-ifc-chip">
-                          <strong>{el.count}</strong>
-                          <small>{el.label}</small>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <small style={{ maxWidth: 560 }}>
-                    للعرض ثلاثي الأبعاد الكامل لنماذج IFC و RVT، يمكنك ربط عارض BIM ويب
-                    خارجي (مثل IFC.js / Speckle / Autodesk Viewer) من إعدادات العارض، أو
-                    تنزيل النموذج الأصلي المحفوظ بالكامل.
-                  </small>
-                  <div className="sa-fallback-actions">
-                    {viewerConfig.enabled && viewerConfig.viewerUrlTemplate ? (
-                      <a
-                        href={viewerConfig.viewerUrlTemplate.replace(
-                          "{fileName}",
-                          encodeURIComponent(previewFile.name)
-                        )}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="primary"
-                      >
-                        <ExternalLink size={15} /> فتح في {viewerConfig.viewerName}
-                      </a>
-                    ) : (
-                      <button
-                        type="button"
-                        className="sa-btn-subtle"
-                        onClick={() => {
-                          closePreview();
-                          setShowIntegrationModal(true);
-                        }}
-                      >
-                        <Settings2 size={15} /> إعداد عارض BIM/CAD خارجي
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="sa-cad-fallback">
-                  {renderGroupIcon(previewFile.fileGroup)}
-                  <h3>
-                    {previewFile.name} ({previewFile.extension})
-                  </h3>
-                  <p>
-                    {["DWG", "DWT", "DWS", "RVT", "RFA", "RTE", "NWC", "NWD", "DWF", "DWFX"].includes(
-                      previewFile.extension.toUpperCase()
-                    )
-                      ? "الملف الهندسي الأصلي محفوظ في الأرشيف بتطابق تام دون أي تعديل. تتطلب المعاينة التفاعلية المباشرة لملفات DWG و Revit و Navisworks ربط محرك عرض هندسي متخصص (مثل Autodesk Platform Services Viewer أو خادم تحويل سحابي)."
-                      : "المستندات المكتبية (Word / Excel / PowerPoint) محفوظة بنسختها الأصلية في IndexedDB؛ يمكنك تنزيلها مباشرة لفتحها بتطبيقات Office أو ربط خدمة معاينة مستندات خلفية."}
-                  </p>
-                  <div className="sa-fallback-actions">
-                    <button
-                      type="button"
-                      className="primary"
-                      style={{ marginTop: 0 }}
-                      onClick={() => handleDownloadOriginal(previewFile)}
-                    >
-                      <Download size={15} /> تنزيل الملف الأصلي ({formatFileSize(previewFile.size)})
-                    </button>
-                    {viewerConfig.enabled && viewerConfig.viewerUrlTemplate ? (
-                      <a
-                        href={viewerConfig.viewerUrlTemplate.replace(
-                          "{fileName}",
-                          encodeURIComponent(previewFile.name)
-                        )}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="sa-btn-subtle"
-                      >
-                        <ExternalLink size={15} /> فتح عبر {viewerConfig.viewerName}
-                      </a>
-                    ) : (
-                      <button
-                        type="button"
-                        className="sa-btn-subtle"
-                        onClick={() => {
-                          closePreview();
-                          setShowIntegrationModal(true);
-                        }}
-                      >
-                        <Settings2 size={15} /> ربط عارض خارجي عند توفره
-                      </button>
-                    )}
-                  </div>
-                </div>
+                </label>
               )}
-            </div>
+              <label>
+                اسم المجلد
+                <input
+                  required
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                />
+              </label>
+              <button className="primary">حفظ التعديلات</button>
+            </form>
           </section>
         </div>
       )}

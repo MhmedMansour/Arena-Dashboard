@@ -3,10 +3,9 @@ import {
   FolderKanban,
   Files,
   Wrench,
-  FolderArchive,
-  UserCheck,
   Settings,
   ChevronLeft,
+  ChevronRight,
   Plus,
   Upload,
   CalendarDays,
@@ -23,17 +22,32 @@ import {
   CheckCircle2,
   AlertCircle,
   Zap,
-  Briefcase,
   Trash2,
+  Edit3,
+  Eye,
+  Share2,
+  CheckSquare,
+  Square,
+  RotateCcw,
+  Award,
 } from "lucide-react";
 import SmartArchiveView from "./components/SmartArchiveView";
-import DevAssistant from "./components/DevAssistant";
 import CvProfileView from "./components/CvProfileView";
 import OmExecutionView from "./components/OmExecutionView";
 import SettingsView, { SettingsSubTab } from "./components/SettingsView";
+import MonthlyCalendarView, {
+  OverviewMonthCalendarCard,
+} from "./components/MonthlyCalendarView";
+import UniversalFilePreviewModal, {
+  PreviewTarget,
+} from "./components/UniversalFilePreviewModal";
+import ShareShowcaseModal from "./components/ShareShowcaseModal";
 import { BrandMark, ProfileAvatar } from "./components/ProfileAvatar";
 import { archiveStorage } from "./services/archiveStorage";
+import { ArchiveFileMetadata } from "./types/smartArchive";
 import {
+  CalendarEventItem,
+  CvCertification,
   CvProfileData,
   DashboardSettings,
   LibraryFileItem,
@@ -45,6 +59,7 @@ import {
   SyncState,
 } from "./types/mhmed";
 import {
+  DEFAULT_CALENDAR_EVENTS,
   DEFAULT_CV_DATA,
   DEFAULT_OM_WORK_ORDERS,
   DEFAULT_PROJECTS,
@@ -54,7 +69,10 @@ import {
 import {
   broadcastTabSync,
   buildSyncSnapshot,
+  loadActiveMonth,
+  loadCalendarEvents,
   loadCvData,
+  loadLibraryFilesMeta,
   loadProjects,
   loadSettings,
   loadSyncConfig,
@@ -63,28 +81,88 @@ import {
   pullFromSupabase,
   pushToGitHubGist,
   pushToSupabase,
+  saveActiveMonth,
+  saveCalendarEvents,
   saveCvData,
+  saveLibraryFilesMeta,
   saveProjects,
   saveSettings,
   saveSyncConfig,
   saveWorkOrders,
   subscribeTabSync,
 } from "./services/syncService";
-import { AssistantAction } from "./services/assistantService";
 import { buildNavTabs } from "./components/navIcons";
+import {
+  clampDateToMonth,
+  defaultDateInMonth,
+  formatMonthArabic,
+  shiftMonthKey,
+  todayKey,
+  todayMonthKey,
+} from "./utils/date";
 
 const filesDb = new Promise<IDBDatabase>((res, rej) => {
   const r = indexedDB.open("mimar-files", 1);
-  r.onupgradeneeded = () => r.result.createObjectStore("files", { keyPath: "id" });
+  r.onupgradeneeded = () => {
+    if (!r.result.objectStoreNames.contains("files")) {
+      r.result.createObjectStore("files", { keyPath: "id" });
+    }
+  };
   r.onsuccess = () => res(r.result);
   r.onerror = () => rej(r.error);
 });
+
+async function getStoredFileBlob(id: string): Promise<Blob | null> {
+  try {
+    const d = await filesDb;
+    const req = d.transaction("files", "readonly").objectStore("files").get(id);
+    const row: { blob?: Blob } | undefined = await new Promise((resolve) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(undefined);
+    });
+    return row?.blob instanceof Blob ? row.blob : null;
+  } catch {
+    return null;
+  }
+}
+
+async function putStoredFileBlob(meta: LibraryFileItem, blob: Blob): Promise<void> {
+  const d = await filesDb;
+  await new Promise<void>((resolve, reject) => {
+    const tx = d.transaction("files", "readwrite");
+    tx.objectStore("files").put({ ...meta, blob });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function deleteStoredFileBlob(id: string): Promise<void> {
+  try {
+    const d = await filesDb;
+    await new Promise<void>((resolve) => {
+      const tx = d.transaction("files", "readwrite");
+      tx.objectStore("files").delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch {
+    // ignore
+  }
+}
 
 export default function App() {
   const [settings, setSettingsState] = useState<DashboardSettings>(loadSettings);
   const [cv, setCvState] = useState<CvProfileData>(loadCvData);
   const [projects, setProjectsState] = useState<ProjectItem[]>(loadProjects);
   const [workOrders, setWorkOrdersState] = useState<OmWorkOrder[]>(loadWorkOrders);
+  const [calendarEvents, setCalendarEventsState] =
+    useState<CalendarEventItem[]>(loadCalendarEvents);
+  const [activeMonth, setActiveMonthState] = useState<string>(loadActiveMonth);
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    const m = loadActiveMonth();
+    const t = todayKey();
+    return clampDateToMonth(t, m);
+  });
   const [syncConfig, setSyncConfigState] = useState<SyncConfig>(loadSyncConfig);
 
   const [tab, setTab] = useState<MainTabId>(() => {
@@ -93,20 +171,33 @@ export default function App() {
   });
   const [settingsSection, setSettingsSection] = useState<SettingsSubTab>("brand");
 
-  const [files, setFiles] = useState<LibraryFileItem[]>(DEFAULT_SAMPLE_FILES);
+  const [files, setFilesState] = useState<LibraryFileItem[]>(
+    () => loadLibraryFilesMeta() ?? DEFAULT_SAMPLE_FILES
+  );
   const [smartArchiveCount, setSmartArchiveCount] = useState(0);
   const [projectFilter, setProjectFilter] = useState("all");
-  const [modal, setModal] = useState("");
+  const [modal, setModal] = useState<"" | "new" | "upload" | "detail">("");
   const [pid, setPid] = useState("");
   const [q, setQ] = useState("");
   const [mobile, setMobile] = useState(false);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Full Edit & Preview & Pre-Share Showcase Modals
+  const [editingProject, setEditingProject] = useState<ProjectItem | null>(null);
+  const [editingFile, setEditingFile] = useState<LibraryFileItem | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [addingCert, setAddingCert] = useState(false);
+  const [editingCert, setEditingCert] = useState<CvCertification | null>(null);
+
   const [syncState, setSyncState] = useState<SyncState>("synced");
   const [syncError, setSyncError] = useState("");
 
   const input = useRef<HTMLInputElement>(null);
+  const quickUploadInput = useRef<HTMLInputElement>(null);
+  const replaceFileInput = useRef<HTMLInputElement>(null);
+  const quickUploadCatRef = useRef<string>("عينات الأعمال");
   const autoSyncTimer = useRef<number | null>(null);
   const skipNextAutoSync = useRef(false);
 
@@ -134,16 +225,31 @@ export default function App() {
     document.title = `${settings.dashboardName || "Mhmed"} | مساحة العمل الهندسية`;
   }, [settings]);
 
-  // Load IndexedDB local files + smart archive count
+  // Hydrate IndexedDB local files if not yet stored in filesMeta + smart archive count
   useEffect(() => {
     filesDb
       .then((d) => {
         const r = d.transaction("files").objectStore("files").getAll();
-        r.onsuccess = () =>
-          setFiles([
-            ...r.result.map(({ blob: _blob, ...m }: { blob: Blob } & LibraryFileItem) => m).reverse(),
-            ...DEFAULT_SAMPLE_FILES,
-          ]);
+        r.onsuccess = () => {
+          const savedMeta = loadLibraryFilesMeta();
+          const idbMetas = (r.result || [])
+            .map(({ blob: _blob, ...m }: { blob?: Blob } & LibraryFileItem) => m)
+            .reverse();
+          if (savedMeta !== null) {
+            // Merge any IndexedDB entries not yet listed in savedMeta
+            const existingIds = new Set(savedMeta.map((x) => x.id));
+            const missing = idbMetas.filter((x) => !existingIds.has(x.id));
+            if (missing.length > 0) {
+              const merged = [...missing, ...savedMeta];
+              setFilesState(merged);
+              saveLibraryFilesMeta(merged);
+            }
+          } else if (idbMetas.length > 0) {
+            const merged = [...idbMetas, ...DEFAULT_SAMPLE_FILES];
+            setFilesState(merged);
+            saveLibraryFilesMeta(merged);
+          }
+        };
       })
       .catch(() => setMsg("تعذر فتح التخزين المحلي للملفات"));
 
@@ -169,13 +275,30 @@ export default function App() {
       setCvState(snap.cv);
       setProjectsState(snap.projects);
       setWorkOrdersState(snap.workOrders);
+      if (Array.isArray(snap.calendarEvents)) {
+        setCalendarEventsState(snap.calendarEvents);
+      }
+      if (Array.isArray(snap.libraryFiles)) {
+        setFilesState(snap.libraryFiles);
+      }
+      if (snap.activeMonth) {
+        setActiveMonthState(snap.activeMonth);
+      }
       setSyncState("synced");
     });
   }, []);
 
   const getCurrentSnapshot = useCallback((): MhmedSyncSnapshot => {
-    return buildSyncSnapshot(settings, cv, projects, workOrders);
-  }, [settings, cv, projects, workOrders]);
+    return buildSyncSnapshot(
+      settings,
+      cv,
+      projects,
+      workOrders,
+      calendarEvents,
+      files,
+      activeMonth
+    );
+  }, [settings, cv, projects, workOrders, calendarEvents, files, activeMonth]);
 
   const updateSyncConfig = useCallback((next: SyncConfig) => {
     saveSyncConfig(next);
@@ -184,7 +307,15 @@ export default function App() {
 
   const pushToCloud = useCallback(
     async (silent = false) => {
-      const snap = buildSyncSnapshot(settings, cv, projects, workOrders);
+      const snap = buildSyncSnapshot(
+        settings,
+        cv,
+        projects,
+        workOrders,
+        calendarEvents,
+        files,
+        activeMonth
+      );
       if (syncConfig.provider === "local") {
         broadcastTabSync(snap);
         const updatedCfg: SyncConfig = {
@@ -230,13 +361,24 @@ export default function App() {
         setSyncState("synced");
         if (!silent) setMsg("تمت المزامنة السحابية بنجاح ✓");
       } catch (err) {
-        const message = err instanceof Error ? err.message : "فشلت المزامنة السحابية";
+        const message =
+          err instanceof Error ? err.message : "فشلت المزامنة السحابية";
         setSyncState("error");
         setSyncError(message);
         if (!silent) setMsg(message);
       }
     },
-    [settings, cv, projects, workOrders, syncConfig, updateSyncConfig]
+    [
+      settings,
+      cv,
+      projects,
+      workOrders,
+      calendarEvents,
+      files,
+      activeMonth,
+      syncConfig,
+      updateSyncConfig,
+    ]
   );
 
   const pullFromCloud = useCallback(async () => {
@@ -265,17 +407,7 @@ export default function App() {
         );
       }
 
-      skipNextAutoSync.current = true;
-      saveSettings(snap.settings);
-      saveCvData(snap.cv);
-      saveProjects(snap.projects);
-      saveWorkOrders(snap.workOrders);
-      setSettingsState(snap.settings);
-      setCvState(snap.cv);
-      setProjectsState(snap.projects);
-      setWorkOrdersState(snap.workOrders);
-      broadcastTabSync(snap);
-
+      applyImportedSnapshot(snap);
       updateSyncConfig({
         ...syncConfig,
         githubGistId: nextGistId,
@@ -285,7 +417,8 @@ export default function App() {
       setSyncState("synced");
       setMsg("تم سحب أحدث نسخة متزامنة وتحديث الداشبورد بالكامل ✓");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "فشل سحب النسخة السحابية";
+      const message =
+        err instanceof Error ? err.message : "فشل سحب النسخة السحابية";
       setSyncState("error");
       setSyncError(message);
       setMsg(message);
@@ -298,9 +431,20 @@ export default function App() {
       nextSettings: DashboardSettings,
       nextCv: CvProfileData,
       nextProjects: ProjectItem[],
-      nextOrders: OmWorkOrder[]
+      nextOrders: OmWorkOrder[],
+      nextEvents: CalendarEventItem[],
+      nextFiles: LibraryFileItem[],
+      nextMonth: string
     ) => {
-      const snap = buildSyncSnapshot(nextSettings, nextCv, nextProjects, nextOrders);
+      const snap = buildSyncSnapshot(
+        nextSettings,
+        nextCv,
+        nextProjects,
+        nextOrders,
+        nextEvents,
+        nextFiles,
+        nextMonth
+      );
       broadcastTabSync(snap);
 
       if (skipNextAutoSync.current) {
@@ -355,7 +499,9 @@ export default function App() {
           }
         } catch (err) {
           setSyncState("error");
-          setSyncError(err instanceof Error ? err.message : "تعذرت المزامنة التلقائية");
+          setSyncError(
+            err instanceof Error ? err.message : "تعذرت المزامنة التلقائية"
+          );
         }
       }, 2400);
     },
@@ -365,26 +511,102 @@ export default function App() {
   function updateSettings(next: DashboardSettings) {
     saveSettings(next);
     setSettingsState(next);
-    triggerLocalAndCloudSync(next, cv, projects, workOrders);
+    triggerLocalAndCloudSync(
+      next,
+      cv,
+      projects,
+      workOrders,
+      calendarEvents,
+      files,
+      activeMonth
+    );
   }
 
   function updateCv(next: CvProfileData) {
     saveCvData(next);
     setCvState(next);
-    // Keep profile displayName/role synced with CV updates when appropriate
-    triggerLocalAndCloudSync(settings, next, projects, workOrders);
+    triggerLocalAndCloudSync(
+      settings,
+      next,
+      projects,
+      workOrders,
+      calendarEvents,
+      files,
+      activeMonth
+    );
   }
 
   function updateProjects(next: ProjectItem[]) {
     saveProjects(next);
     setProjectsState(next);
-    triggerLocalAndCloudSync(settings, cv, next, workOrders);
+    triggerLocalAndCloudSync(
+      settings,
+      cv,
+      next,
+      workOrders,
+      calendarEvents,
+      files,
+      activeMonth
+    );
   }
 
   function updateWorkOrders(next: OmWorkOrder[]) {
     saveWorkOrders(next);
     setWorkOrdersState(next);
-    triggerLocalAndCloudSync(settings, cv, projects, next);
+    triggerLocalAndCloudSync(
+      settings,
+      cv,
+      projects,
+      next,
+      calendarEvents,
+      files,
+      activeMonth
+    );
+  }
+
+  function updateCalendarEvents(next: CalendarEventItem[]) {
+    saveCalendarEvents(next);
+    setCalendarEventsState(next);
+    triggerLocalAndCloudSync(
+      settings,
+      cv,
+      projects,
+      workOrders,
+      next,
+      files,
+      activeMonth
+    );
+  }
+
+  function updateFiles(next: LibraryFileItem[]) {
+    saveLibraryFilesMeta(next);
+    setFilesState(next);
+    triggerLocalAndCloudSync(
+      settings,
+      cv,
+      projects,
+      workOrders,
+      calendarEvents,
+      next,
+      activeMonth
+    );
+  }
+
+  function changeActiveMonth(nextMonth: string) {
+    saveActiveMonth(nextMonth);
+    setActiveMonthState(nextMonth);
+    if (!selectedDate.startsWith(nextMonth)) {
+      setSelectedDate(clampDateToMonth(selectedDate, nextMonth));
+    }
+    triggerLocalAndCloudSync(
+      settings,
+      cv,
+      projects,
+      workOrders,
+      calendarEvents,
+      files,
+      nextMonth
+    );
   }
 
   function applyImportedSnapshot(snap: MhmedSyncSnapshot) {
@@ -397,19 +619,41 @@ export default function App() {
     setCvState(snap.cv);
     setProjectsState(snap.projects);
     setWorkOrdersState(snap.workOrders);
+
+    if (Array.isArray(snap.calendarEvents)) {
+      saveCalendarEvents(snap.calendarEvents);
+      setCalendarEventsState(snap.calendarEvents);
+    }
+    if (Array.isArray(snap.libraryFiles)) {
+      saveLibraryFilesMeta(snap.libraryFiles);
+      setFilesState(snap.libraryFiles);
+    }
+    if (snap.activeMonth) {
+      saveActiveMonth(snap.activeMonth);
+      setActiveMonthState(snap.activeMonth);
+    }
+
     broadcastTabSync(snap);
     setSyncState("synced");
   }
 
   function resetAllToCvDefaults() {
+    const defMonth = todayMonthKey();
     saveSettings(DEFAULT_SETTINGS);
     saveCvData(DEFAULT_CV_DATA);
     saveProjects(DEFAULT_PROJECTS);
     saveWorkOrders(DEFAULT_OM_WORK_ORDERS);
+    saveCalendarEvents(DEFAULT_CALENDAR_EVENTS);
+    saveLibraryFilesMeta(DEFAULT_SAMPLE_FILES);
+    saveActiveMonth(defMonth);
+
     setSettingsState(DEFAULT_SETTINGS);
     setCvState(DEFAULT_CV_DATA);
     setProjectsState(DEFAULT_PROJECTS);
     setWorkOrdersState(DEFAULT_OM_WORK_ORDERS);
+    setCalendarEventsState(DEFAULT_CALENDAR_EVENTS);
+    setFilesState(DEFAULT_SAMPLE_FILES);
+    setActiveMonthState(defMonth);
     setMsg("تمت استعادة كافة بيانات السيرة الذاتية وإعدادات Mhmed الافتراضية");
   }
 
@@ -421,43 +665,372 @@ export default function App() {
     setMobile(false);
   }
 
-  function handleAssistantAction(action: AssistantAction) {
-    if (action.type === "navigate") {
-      nav(action.tab, action.sub);
-    } else if (action.type === "openModal") {
-      setPid("");
-      setModal(action.modal);
-    } else if (action.type === "openSettings") {
-      nav("settings", action.sub || "assistant");
+  /* ---------- Universal File Preview, Upload, Edit & Delete ---------- */
+  async function previewLibraryFile(f: LibraryFileItem) {
+    const projName = projects.find((p) => p.id === f.project)?.name;
+    // Check if there is a binary blob stored in IndexedDB (uploaded or replaced)
+    const storedBlob = await getStoredFileBlob(f.id);
+    if (storedBlob) {
+      setPreviewTarget({
+        id: f.id,
+        name: f.name,
+        size: f.size || storedBlob.size,
+        mimeType: f.mimeType || storedBlob.type,
+        blob: storedBlob,
+        category: f.cat,
+        projectName: projName,
+        notes: f.notes,
+        addedAt: f.date,
+      });
+      return;
+    }
+
+    // Check if promoted from Smart Archive
+    if (f.archiveFileId) {
+      const archBlob = await archiveStorage.getFileBlob(f.archiveFileId);
+      if (archBlob) {
+        setPreviewTarget({
+          id: f.id,
+          name: f.name,
+          size: f.size || archBlob.size,
+          mimeType: f.mimeType || archBlob.type,
+          blob: archBlob,
+          category: f.cat,
+          projectName: projName,
+          notes: f.notes,
+          addedAt: f.date,
+        });
+        return;
+      }
+    }
+
+    // Built-in CV or built-in sample SVG artwork
+    const staticUrl = f.isBuiltinCv
+      ? "./cv/Mohamed_Mansour_CV.pdf"
+      : f.art !== undefined
+        ? `./art/${f.art}.svg`
+        : undefined;
+
+    if (staticUrl) {
+      setPreviewTarget({
+        id: f.id,
+        name: f.name,
+        size: f.size,
+        url: staticUrl,
+        category: f.cat,
+        projectName: projName,
+        notes: f.notes,
+        addedAt: f.date,
+      });
+    } else {
+      setMsg("محتوى هذا الملف غير محفوظ محلياً في هذا المتصفح");
     }
   }
 
   async function downloadFile(f: LibraryFileItem) {
-    let href = f.isBuiltinCv
+    const storedBlob = await getStoredFileBlob(f.id);
+    if (storedBlob) {
+      const href = URL.createObjectURL(storedBlob);
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = f.name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(href), 3000);
+      return;
+    }
+    if (f.archiveFileId) {
+      const archBlob = await archiveStorage.getFileBlob(f.archiveFileId);
+      if (archBlob) {
+        const href = URL.createObjectURL(archBlob);
+        const a = document.createElement("a");
+        a.href = href;
+        a.download = f.name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(href), 3000);
+        return;
+      }
+    }
+    const href = f.isBuiltinCv
       ? "./cv/Mohamed_Mansour_CV.pdf"
-      : `./art/${f.art}.svg`;
-    if (!f.art && !f.isBuiltinCv) {
-      const d = await filesDb;
-      const r = d.transaction("files").objectStore("files").get(f.id);
-      const item: { blob: Blob } = await new Promise(
-        (ok) => (r.onsuccess = () => ok(r.result))
-      );
-      href = URL.createObjectURL(item.blob);
+      : f.art !== undefined
+        ? `./art/${f.art}.svg`
+        : "";
+    if (!href) {
+      setMsg("تعذر العثور على الملف للتنزيل");
+      return;
     }
     const a = document.createElement("a");
     a.href = href;
     a.download = f.name;
     a.click();
-    if (!f.art && !f.isBuiltinCv) setTimeout(() => URL.revokeObjectURL(href), 3000);
   }
 
+  async function deleteFileItem(f: LibraryFileItem) {
+    await deleteStoredFileBlob(f.id);
+    updateFiles(files.filter((x) => x.id !== f.id));
+    if (editingFile?.id === f.id) setEditingFile(null);
+    if (previewTarget?.id === f.id) setPreviewTarget(null);
+    setMsg(`تم حذف الملف "${f.name}"`);
+  }
+
+  function triggerQuickUpload(category: string) {
+    quickUploadCatRef.current = category;
+    quickUploadInput.current?.click();
+  }
+
+  async function handleQuickUploadFiles(fileList: FileList | null) {
+    if (!fileList?.length) return;
+    const cat = quickUploadCatRef.current;
+    const created: LibraryFileItem[] = [];
+    let firstBlob: Blob | null = null;
+
+    for (const raw of Array.from(fileList)) {
+      const item: LibraryFileItem = {
+        id: "file-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+        name: raw.name,
+        cat,
+        project: pid || "",
+        size: raw.size,
+        date: Date.now(),
+        mimeType: raw.type || undefined,
+        dueDate: defaultDateInMonth(activeMonth, new Date().getDate()),
+        selectedForDisplay: cat === "عينات الأعمال" || cat === "الشهادات",
+      };
+      try {
+        await putStoredFileBlob(item, raw);
+      } catch {
+        // Ignore quota errors
+      }
+      if (!firstBlob) firstBlob = raw;
+      created.push(item);
+    }
+
+    if (created.length > 0) {
+      const next = [...created, ...files];
+      updateFiles(next);
+      // Immediately open the Universal Preview Modal for the uploaded file!
+      if (firstBlob) {
+        setPreviewTarget({
+          id: created[0].id,
+          name: created[0].name,
+          size: created[0].size,
+          mimeType: created[0].mimeType,
+          blob: firstBlob,
+          category: created[0].cat,
+          addedAt: created[0].date,
+        });
+      }
+      setMsg(
+        created.length === 1
+          ? `تم رفع "${created[0].name}" وفتح المعاينة الفورية`
+          : `تم رفع ${created.length} ملفات وفتح المعاينة الفورية`
+      );
+    }
+  }
+
+  async function handlePromoteArchiveToSample(
+    meta: ArchiveFileMetadata,
+    blob: Blob
+  ) {
+    const item: LibraryFileItem = {
+      id: "arch-sample-" + Date.now(),
+      name: meta.name,
+      cat: "عينات الأعمال",
+      project: meta.projectId || "",
+      size: meta.size,
+      date: Date.now(),
+      archiveFileId: meta.id,
+      dueDate: meta.documentDate || defaultDateInMonth(activeMonth, 15),
+      notes: `${meta.section} · ${meta.discipline}${meta.notes ? ` — ${meta.notes}` : ""}`,
+      selectedForDisplay: true,
+    };
+    try {
+      await putStoredFileBlob(item, blob);
+    } catch {
+      // Fallback to archiveFileId lookup
+    }
+    updateFiles([item, ...files]);
+    setMsg(`تمت إضافة "${meta.name}" إلى عينات الأعمال المختارة للعرض`);
+  }
+
+  async function handleReplaceEditingFileBlob(
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const raw = e.target.files?.[0];
+    if (!raw || !editingFile) return;
+    const updated: LibraryFileItem = {
+      ...editingFile,
+      name: raw.name,
+      size: raw.size,
+      mimeType: raw.type || undefined,
+      isBuiltinCv: false,
+      art: undefined,
+      date: Date.now(),
+    };
+    try {
+      await putStoredFileBlob(updated, raw);
+    } catch {
+      setMsg("تعذر حفظ محتوى الملف الجديد في المتصفح");
+      return;
+    }
+    setEditingFile(updated);
+    updateFiles(files.map((x) => (x.id === updated.id ? updated : x)));
+    setMsg(`تم استبدال محتوى الملف بـ "${raw.name}"`);
+    e.target.value = "";
+  }
+
+  function handleSaveFileEdit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editingFile) return;
+    const f = new FormData(e.currentTarget);
+    const updated: LibraryFileItem = {
+      ...editingFile,
+      name: String(f.get("name") || "").trim() || editingFile.name,
+      cat: String(f.get("cat") || editingFile.cat),
+      project: String(f.get("project") || ""),
+      dueDate: String(f.get("dueDate") || "").trim() || undefined,
+      notes: String(f.get("notes") || "").trim() || undefined,
+      selectedForDisplay: f.get("selectedForDisplay") === "on",
+    };
+    updateFiles(files.map((x) => (x.id === updated.id ? updated : x)));
+    setEditingFile(null);
+    setMsg(`تم حفظ تعديلات الملف "${updated.name}"`);
+  }
+
+  function toggleFileDisplay(fileId: string) {
+    updateFiles(
+      files.map((f) =>
+        f.id === fileId
+          ? { ...f, selectedForDisplay: f.selectedForDisplay === false }
+          : f
+      )
+    );
+  }
+
+  function toggleProjectDisplay(projectId: string) {
+    updateProjects(
+      projects.map((p) =>
+        p.id === projectId
+          ? { ...p, selectedForDisplay: p.selectedForDisplay === false }
+          : p
+      )
+    );
+  }
+
+  function toggleCertDisplay(certId: string) {
+    updateCv({
+      ...cv,
+      certifications: cv.certifications.map((c) =>
+        c.id === certId
+          ? { ...c, selectedForDisplay: c.selectedForDisplay === false }
+          : c
+      ),
+    });
+  }
+
+  /* ---------- Project Edit & Delete ---------- */
+  function handleSaveProjectEdit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editingProject) return;
+    const f = new FormData(e.currentTarget);
+    const type = String(f.get("type") || editingProject.type);
+    const updated: ProjectItem = {
+      ...editingProject,
+      name: String(f.get("name") || "").trim() || editingProject.name,
+      nameEn: String(f.get("nameEn") || "").trim() || undefined,
+      city: String(f.get("city") || "").trim() || editingProject.city,
+      client: String(f.get("client") || "").trim() || undefined,
+      type,
+      discipline: String(f.get("discipline") || "").trim() || undefined,
+      progress: Math.min(100, Math.max(0, Number(f.get("progress") || 0))),
+      targetDate: String(f.get("targetDate") || "").trim() || undefined,
+      notes: String(f.get("notes") || "").trim() || undefined,
+      selectedForDisplay: f.get("selectedForDisplay") === "on",
+      art:
+        editingProject.art ||
+        (type.includes("Revit")
+          ? 2
+          : type.includes("صيانة") || type.includes("تشغيل")
+            ? 3
+            : 1),
+      updatedAt: Date.now(),
+    };
+    updateProjects(projects.map((p) => (p.id === updated.id ? updated : p)));
+    setEditingProject(null);
+    setMsg(`تم حفظ تعديلات المشروع "${updated.name}"`);
+  }
+
+  function deleteProjectById(id: string) {
+    updateProjects(projects.filter((p) => p.id !== id));
+    if (pid === id) {
+      setPid("");
+      setModal("");
+    }
+    if (editingProject?.id === id) setEditingProject(null);
+    setMsg("تم حذف المشروع");
+  }
+
+  /* ---------- Certificate Quick CRUD ---------- */
+  function handleCreateCert(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const item: CvCertification = {
+      id: "cert-" + Date.now(),
+      title: String(f.get("title") || "").trim(),
+      issuer: String(f.get("issuer") || "").trim(),
+      year: String(f.get("year") || "2026").trim(),
+      category: String(f.get("category") || "اعتماد هندسي").trim(),
+      selectedForDisplay: f.get("selectedForDisplay") === "on",
+    };
+    updateCv({ ...cv, certifications: [item, ...cv.certifications] });
+    setAddingCert(false);
+    setMsg("تمت إضافة الشهادة / الاعتماد");
+  }
+
+  function handleSaveCertEdit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editingCert) return;
+    const f = new FormData(e.currentTarget);
+    const updated: CvCertification = {
+      ...editingCert,
+      title: String(f.get("title") || "").trim() || editingCert.title,
+      issuer: String(f.get("issuer") || "").trim() || editingCert.issuer,
+      year: String(f.get("year") || "").trim() || editingCert.year,
+      category: String(f.get("category") || "").trim() || editingCert.category,
+      selectedForDisplay: f.get("selectedForDisplay") === "on",
+    };
+    updateCv({
+      ...cv,
+      certifications: cv.certifications.map((c) =>
+        c.id === updated.id ? updated : c
+      ),
+    });
+    setEditingCert(null);
+    setMsg("تم حفظ تعديلات الشهادة");
+  }
+
+  function deleteCertById(certId: string) {
+    updateCv({
+      ...cv,
+      certifications: cv.certifications.filter((c) => c.id !== certId),
+    });
+    if (editingCert?.id === certId) setEditingCert(null);
+    setMsg("تم حذف الشهادة");
+  }
+
+  /* ---------- Navigation & Computed Collections ---------- */
   const navTabs = useMemo(
     () =>
       buildNavTabs({
         order: settings.workspace.navOrder,
         iconOverrides: settings.workspace.navIcons,
+        labels: settings.workspace.navLabels,
       }),
-    [settings.workspace.navOrder, settings.workspace.navIcons]
+    [
+      settings.workspace.navOrder,
+      settings.workspace.navIcons,
+      settings.workspace.navLabels,
+    ]
   );
 
   const visibleTabs = useMemo(
@@ -474,25 +1047,108 @@ export default function App() {
   const activeTabLabel =
     navTabs.find((t) => t.id === tab)?.label || "نظرة عامة";
 
-  const rows = (list: LibraryFileItem[]) =>
+  const sampleFilesAll = useMemo(
+    () => files.filter((f) => f.cat === "عينات الأعمال"),
+    [files]
+  );
+  const selectedSampleCount = useMemo(
+    () =>
+      sampleFilesAll.filter((f) => f.selectedForDisplay !== false).length,
+    [sampleFilesAll]
+  );
+
+  const monthItemsCount = useMemo(
+    () =>
+      calendarEvents.filter((e) => e.date.startsWith(activeMonth)).length +
+      workOrders.filter((w) => w.dueDate.startsWith(activeMonth)).length,
+    [calendarEvents, workOrders, activeMonth]
+  );
+
+  const renderFileRows = (list: LibraryFileItem[], showSampleToggle = false) =>
     list.length ? (
-      list.map((f) => (
-        <div className="row" key={f.id}>
-          <span className="fileicon">
-            <FileText size={17} />
-          </span>
-          <div>
-            <b>{f.name}</b>
-            <small>{projects.find((p) => p.id === f.project)?.name || f.cat}</small>
+      list.map((f) => {
+        const selected = f.selectedForDisplay !== false;
+        return (
+          <div
+            className={`row ${showSampleToggle ? "mh-sample-row" : ""} ${
+              showSampleToggle && !selected ? "is-hidden" : ""
+            }`}
+            key={f.id}
+          >
+            {showSampleToggle ? (
+              <button
+                type="button"
+                className={`mh-sample-check ${selected ? "checked" : ""}`}
+                onClick={() => toggleFileDisplay(f.id)}
+                title={
+                  selected
+                    ? "معروضة في صفحة المشاركة — اضغط لإخفائها"
+                    : "مخفية عن المشاركة — اضغط لإظهارها"
+                }
+              >
+                {selected ? <CheckSquare size={17} /> : <Square size={17} />}
+              </button>
+            ) : (
+              <span className="fileicon">
+                <FileText size={17} />
+              </span>
+            )}
+            <div
+              style={{ cursor: "pointer" }}
+              onClick={() => previewLibraryFile(f)}
+              title="اضغط لمعاينة الملف داخل الداشبورد"
+            >
+              <b>{f.name}</b>
+              <small>
+                {projects.find((p) => p.id === f.project)?.name || f.cat}
+                {f.dueDate ? ` · ${f.dueDate}` : ""}
+              </small>
+            </div>
+            {showSampleToggle && (
+              <button
+                type="button"
+                className={`mh-display-chip ${selected ? "on" : ""}`}
+                onClick={() => toggleFileDisplay(f.id)}
+              >
+                {selected ? "معروضة للمشاركة" : "مخفية"}
+              </button>
+            )}
+            <label>{f.name.split(".").pop()?.toUpperCase()}</label>
+            <div className="sa-row-actions">
+              <button
+                type="button"
+                title="معاينة الملف داخل الداشبورد"
+                onClick={() => previewLibraryFile(f)}
+              >
+                <Eye size={16} />
+              </button>
+              <button
+                type="button"
+                title="تعديل بيانات أو استبدال الملف"
+                onClick={() => setEditingFile(f)}
+              >
+                <Edit3 size={15} />
+              </button>
+              <button
+                type="button"
+                title="تنزيل الملف"
+                onClick={() => downloadFile(f)}
+              >
+                <Download size={16} />
+              </button>
+              <button
+                type="button"
+                title="حذف الملف"
+                onClick={() => deleteFileItem(f)}
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
           </div>
-          <label>{f.name.split(".").pop()?.toUpperCase()}</label>
-          <button type="button" title="تنزيل الملف" onClick={() => downloadFile(f)}>
-            <Download size={17} />
-          </button>
-        </div>
-      ))
+        );
+      })
     ) : (
-      <p className="empty">لا توجد ملفات هنا بعد.</p>
+      <p className="empty">لا توجد ملفات هنا بعد — ارفع أي ملف لمعاينته فوراً.</p>
     );
 
   const activeWorkOrders = workOrders.filter((w) => w.status !== "مكتمل").length;
@@ -504,6 +1160,12 @@ export default function App() {
       target: "projects" as MainTabId,
     },
     {
+      count: monthItemsCount,
+      label: `أجندة ${formatMonthArabic(activeMonth)}`,
+      icon: CalendarDays,
+      target: "calendar" as MainTabId,
+    },
+    {
       count: activeWorkOrders,
       label: "أوامر تشغيل وصيانة MEP",
       icon: Wrench,
@@ -511,15 +1173,9 @@ export default function App() {
     },
     {
       count: files.length + smartArchiveCount,
-      label: "ملفات ومخططات CAD/BIM",
+      label: "ملفات ومخططات قابلة للمعاينة",
       icon: Files,
       target: "archive" as MainTabId,
-    },
-    {
-      count: cv.experiences.length,
-      label: "شركات وخبرات (+15 سنة)",
-      icon: Briefcase,
-      target: "cv" as MainTabId,
     },
   ];
 
@@ -538,7 +1194,8 @@ export default function App() {
     }
     if (projectFilter === "all") return projects;
     return projects.filter(
-      (p) => p.type === projectFilter || (p.discipline || "").includes(projectFilter)
+      (p) =>
+        p.type === projectFilter || (p.discipline || "").includes(projectFilter)
     );
   }, [projects, tab, projectFilter]);
 
@@ -565,8 +1222,28 @@ export default function App() {
         .filter(Boolean)
         .join(" ")}
     >
+      {/* Hidden Quick Upload & File Replace Inputs — accept ANY file type */}
+      <input
+        ref={quickUploadInput}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          handleQuickUploadFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={replaceFileInput}
+        type="file"
+        hidden
+        onChange={handleReplaceEditingFileBlob}
+      />
+
       {/* Sidebar */}
-      <aside className={`${mobile ? "open" : ""} ${sidebarCompact ? "compact" : ""}`}>
+      <aside
+        className={`${mobile ? "open" : ""} ${sidebarCompact ? "compact" : ""}`}
+      >
         <button
           type="button"
           className="brand"
@@ -588,7 +1265,9 @@ export default function App() {
           )}
         </button>
 
-        {!sidebarCompact && <small className="navtitle">مساحة العمل الهندسية</small>}
+        {!sidebarCompact && (
+          <small className="navtitle">مساحة العمل الهندسية</small>
+        )}
 
         <div className="mh-nav-list">
           {visibleTabs.map((item) => {
@@ -652,7 +1331,10 @@ export default function App() {
                 }}
                 disabled={syncState === "syncing"}
               >
-                <RefreshCw size={12} className={syncState === "syncing" ? "mh-spin" : ""} />
+                <RefreshCw
+                  size={12}
+                  className={syncState === "syncing" ? "mh-spin" : ""}
+                />
                 مزامنة الآن
               </button>
             </>
@@ -663,7 +1345,11 @@ export default function App() {
       {/* Main Content */}
       <main>
         <header>
-          <button type="button" className="menu" onClick={() => setMobile(!mobile)}>
+          <button
+            type="button"
+            className="menu"
+            onClick={() => setMobile(!mobile)}
+          >
             <Menu />
           </button>
           <span>{settings.dashboardName || "Mhmed"}</span>
@@ -671,16 +1357,50 @@ export default function App() {
           <b>{activeTabLabel}</b>
 
           <div className="mh-header-end">
-            {settings.appearance.showDate && (
-              <div className="date">
-                <CalendarDays size={15} />
-                {new Date().toLocaleDateString("ar-EG", {
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                })}
-              </div>
-            )}
+            {/* Global Month Switcher Linked to Calendar */}
+            <div
+              className="mh-header-month"
+              title="الشهر النشط المرتبط بالتقويم والمهام"
+            >
+              <button
+                type="button"
+                className="mh-month-step"
+                onClick={() => changeActiveMonth(shiftMonthKey(activeMonth, -1))}
+                aria-label="الشهر السابق"
+              >
+                <ChevronRight size={14} />
+              </button>
+              <button
+                type="button"
+                className={`mh-month-Display ${tab === "calendar" ? "active" : ""}`}
+                onClick={() => nav("calendar")}
+              >
+                <CalendarDays size={14} />
+                <span>{formatMonthArabic(activeMonth)}</span>
+              </button>
+              <button
+                type="button"
+                className="mh-month-step"
+                onClick={() => changeActiveMonth(shiftMonthKey(activeMonth, 1))}
+                aria-label="الشهر التالي"
+              >
+                <ChevronLeft size={14} />
+              </button>
+            </div>
+
+            {/* Pre-Share Sample Selection & Preview Button */}
+            <button
+              type="button"
+              className="sa-btn-subtle active"
+              onClick={() => setShowShareModal(true)}
+              title="اختيار العينات والاطلاع على المعاينة قبل المشاركة"
+            >
+              <Share2 size={15} />
+              <span className="mh-hide-xs">
+                معاينة ومشاركة ({selectedSampleCount})
+              </span>
+            </button>
+
             <button
               type="button"
               className="mh-header-icon-btn"
@@ -688,7 +1408,10 @@ export default function App() {
               title="مزامنة الآن"
               disabled={syncState === "syncing"}
             >
-              <RefreshCw size={16} className={syncState === "syncing" ? "mh-spin" : ""} />
+              <RefreshCw
+                size={16}
+                className={syncState === "syncing" ? "mh-spin" : ""}
+              />
             </button>
             <button
               type="button"
@@ -709,7 +1432,7 @@ export default function App() {
         </header>
 
         <article>
-          {/* OVERVIEW TAB */}
+          {/* ==================== OVERVIEW TAB ==================== */}
           {tab === "overview" && (
             <>
               <section className="hero">
@@ -726,7 +1449,18 @@ export default function App() {
                   </figure>
                 )}
                 <div className="mh-hero-content">
-                  <label>● &nbsp; {settings.heroBadge}</label>
+                  <div className="mh-flex-between" style={{ gap: 8 }}>
+                    <label>● &nbsp; {settings.heroBadge}</label>
+                    <button
+                      type="button"
+                      className="sa-btn-subtle"
+                      style={{ padding: "4px 10px", fontSize: 11.5 }}
+                      onClick={() => nav("settings", "brand")}
+                      title="تعديل عنوان ووصف البانر الترحيبي"
+                    >
+                      <Edit3 size={12} /> تعديل البانر
+                    </button>
+                  </div>
                   <h1>{settings.heroTitle}</h1>
                   <p>{settings.heroSubtitle}</p>
                   <div className="actions">
@@ -740,23 +1474,23 @@ export default function App() {
                     <button
                       type="button"
                       className="outline"
-                      onClick={() => nav("cv")}
+                      onClick={() => triggerQuickUpload("عينات الأعمال")}
                     >
-                      <UserCheck size={16} /> السيرة الذاتية (CV)
+                      <Upload size={16} /> رفع ملف ومعاينته فوراً
                     </button>
                     <button
                       type="button"
                       className="outline"
-                      onClick={() => nav("om")}
+                      onClick={() => setShowShareModal(true)}
                     >
-                      <Zap size={16} /> تشغيل وصيانة MEP
+                      <Share2 size={16} /> اختيار العينات ومعاينة المشاركة
                     </button>
                     <button
                       type="button"
                       className="outline"
-                      onClick={() => nav("archive")}
+                      onClick={() => nav("calendar")}
                     >
-                      <FolderArchive size={16} /> الأرشيف الذكي
+                      <CalendarDays size={16} /> التقويم الشهري
                     </button>
                   </div>
                 </div>
@@ -782,6 +1516,25 @@ export default function App() {
                       </button>
                     );
                   })}
+                </div>
+              )}
+
+              {/* Month-Linked Quick Calendar Card */}
+              {settings.appearance.showQuickCalendarCard !== false && (
+                <div style={{ marginTop: 18 }}>
+                  <OverviewMonthCalendarCard
+                    activeMonth={activeMonth}
+                    onChangeMonth={changeActiveMonth}
+                    selectedDate={selectedDate}
+                    onSelectDate={(d) => {
+                      setSelectedDate(d);
+                      nav("calendar");
+                    }}
+                    events={calendarEvents}
+                    workOrders={workOrders}
+                    projects={projects}
+                    onOpenCalendar={() => nav("calendar")}
+                  />
                 </div>
               )}
 
@@ -817,7 +1570,7 @@ export default function App() {
                           className="sa-btn-subtle active"
                           onClick={() => nav("cv")}
                         >
-                          فتح السيرة الذاتية الكاملة <ChevronLeft size={14} />
+                          عرض وتعديل السيرة الذاتية <ChevronLeft size={14} />
                         </button>
                       </div>
                     </section>
@@ -825,37 +1578,30 @@ export default function App() {
 
                   {settings.appearance.showQuickOmCard && (
                     <section className="mh-panel mh-quick-card">
-                      <div className="mh-panel-title" style={{ marginBottom: 10 }}>
+                      <div className="mh-flex-between">
                         <div>
-                          <small className="eyebrow">ELECTRICAL &amp; MECHANICAL O&amp;M</small>
-                          <h3>أوامر التشغيل والصيانة والتنفيذ</h3>
+                          <small className="eyebrow">MEP O&amp;M · MAXIMO</small>
+                          <h3 style={{ margin: "2px 0" }}>
+                            إشراف التشغيل والصيانة (كهرباء وميكانيكا)
+                          </h3>
                         </div>
+                        <Zap size={22} className="sa-copper-icon" />
+                      </div>
+                      <p className="mh-quick-desc">
+                        {activeWorkOrders} أوامر عمل نشطة في الصيانة الوقائية
+                        والتصحيحية وإشراف التنفيذ الكهروميكانيكي.
+                      </p>
+                      <div className="mh-flex-between" style={{ marginTop: 12 }}>
+                        <span className="mh-pill">
+                          إجمالي المسجل: {workOrders.length} أمر عمل
+                        </span>
                         <button
                           type="button"
-                          className="sa-btn-subtle"
+                          className="sa-btn-subtle active"
                           onClick={() => nav("om")}
                         >
-                          الإدارة الكاملة <ChevronLeft size={14} />
+                          لوحة أوامر العمل <ChevronLeft size={14} />
                         </button>
-                      </div>
-                      <div className="mh-stack-sm">
-                        {workOrders.slice(0, 3).map((wo) => (
-                          <div key={wo.id} className="mh-inset-card mh-mini-wo">
-                            <div>
-                              <b>{wo.title}</b>
-                              <small>
-                                {wo.site} · {wo.system}
-                              </small>
-                            </div>
-                            <span
-                              className={`mh-pill ${
-                                wo.status === "مكتمل" ? "ok" : "accent"
-                              }`}
-                            >
-                              {wo.status}
-                            </span>
-                          </div>
-                        ))}
                       </div>
                     </section>
                   )}
@@ -864,27 +1610,53 @@ export default function App() {
             </>
           )}
 
-          {/* CV PROFILE TAB */}
+          {/* ==================== MONTH-LINKED CALENDAR TAB ==================== */}
+          {tab === "calendar" && (
+            <MonthlyCalendarView
+              activeMonth={activeMonth}
+              onChangeMonth={changeActiveMonth}
+              selectedDate={selectedDate}
+              onSelectDate={setSelectedDate}
+              events={calendarEvents}
+              onChangeEvents={updateCalendarEvents}
+              workOrders={workOrders}
+              onChangeWorkOrders={updateWorkOrders}
+              projects={projects}
+              files={files}
+              onOpenProject={(projId) => {
+                setPid(projId);
+                setModal("detail");
+              }}
+              onPreviewFile={previewLibraryFile}
+              onOpenOmTab={() => nav("om")}
+              onNotify={setMsg}
+            />
+          )}
+
+          {/* ==================== INTERACTIVE CV TAB ==================== */}
           {tab === "cv" && (
             <CvProfileView
               cv={cv}
               profile={settings.profile}
               onUpdateCv={updateCv}
               onOpenAvatarSettings={() => nav("settings", "profile")}
+              onOpenShareShowcase={() => setShowShareModal(true)}
               onNotify={setMsg}
             />
           )}
 
-          {/* O&M SUPERVISION TAB */}
+          {/* ==================== MEP O&M EXECUTION TAB ==================== */}
           {tab === "om" && (
             <OmExecutionView
               workOrders={workOrders}
               onChangeWorkOrders={updateWorkOrders}
+              activeMonth={activeMonth}
+              onOpenCalendar={() => nav("calendar")}
               onNotify={setMsg}
             />
           )}
 
-          {/* PROJECTS SECTION (Overview + Projects + O&M) */}
+          {/* ==================== PROJECTS SECTION ==================== */}
           {(tab === "overview" || tab === "projects" || tab === "om") && (
             <>
               <div className="heading">
@@ -898,15 +1670,26 @@ export default function App() {
                         : "المشاريع الجارية حالياً"}
                   </h2>
                 </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    tab === "overview" ? nav("projects") : setModal("new")
-                  }
-                >
-                  {tab === "overview" ? "عرض كل المشاريع" : "إضافة مشروع جديد"}
-                  <ChevronLeft size={15} />
-                </button>
+                <div className="mh-btn-row">
+                  {tab === "projects" && (
+                    <button
+                      type="button"
+                      className="sa-btn-subtle active"
+                      onClick={() => setShowShareModal(true)}
+                    >
+                      <Share2 size={14} /> معاينة المشاريع بالمشاركة
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      tab === "overview" ? nav("projects") : setModal("new")
+                    }
+                  >
+                    {tab === "overview" ? "عرض كل المشاريع" : "إضافة مشروع جديد"}
+                    <ChevronLeft size={15} />
+                  </button>
+                </div>
               </div>
 
               {tab === "projects" && (
@@ -932,79 +1715,157 @@ export default function App() {
               )}
 
               <div className="cards">
-                {filteredProjects.map((p) => (
-                  <button
-                    type="button"
-                    key={p.id}
-                    className="card"
-                    onClick={() => {
-                      setPid(p.id);
-                      setModal("detail");
-                    }}
-                  >
+                {filteredProjects.map((p) => {
+                  const shown = p.selectedForDisplay !== false;
+                  return (
                     <div
-                      className="drawing"
-                      style={{ backgroundImage: `url(./art/${p.art}.svg)` }}
+                      key={p.id}
+                      className="card"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => {
+                        setPid(p.id);
+                        setModal("detail");
+                      }}
                     >
-                      <label>
-                        ● &nbsp; {p.progress === 100 ? "مكتمل" : "قيد التنفيذ"}
-                      </label>
-                    </div>
-                    <div className="cardbody">
-                      <small className="tech">
-                        <Layers size={13} />
-                        {p.type}
-                        {p.discipline ? ` · ${p.discipline}` : ""}
-                      </small>
-                      <h3>{p.name}</h3>
-                      <small>
-                        <MapPin size={13} />
-                        {p.city}
-                      </small>
-                      <div className="progress">
-                        <span>نسبة الإنجاز</span>
-                        <b>{p.progress}%</b>
+                      <div
+                        className="drawing"
+                        style={{ backgroundImage: `url(./art/${p.art || 1}.svg)` }}
+                      >
+                        <label>
+                          ● &nbsp; {p.progress === 100 ? "مكتمل" : "قيد التنفيذ"}
+                        </label>
                       </div>
-                      <div className="track">
-                        <i style={{ width: p.progress + "%" }} />
+                      <div className="cardbody">
+                        <div
+                          className="mh-flex-between"
+                          style={{ gap: 6, marginBottom: 4 }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <small className="tech" style={{ margin: 0 }}>
+                            <Layers size={13} />
+                            {p.type}
+                          </small>
+                          <div className="mh-card-inline-tools">
+                            <button
+                              type="button"
+                              className={`mh-display-chip ${shown ? "on" : ""}`}
+                              onClick={() => toggleProjectDisplay(p.id)}
+                              title="تحديد أو إخفاء المشروع عند المشاركة"
+                            >
+                              {shown ? "معروض" : "مخفي"}
+                            </button>
+                            <button
+                              type="button"
+                              className="mh-icon-tiny"
+                              title="تعديل المشروع"
+                              onClick={() => setEditingProject(p)}
+                            >
+                              <Edit3 size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              className="mh-icon-tiny danger"
+                              title="حذف المشروع"
+                              onClick={() => deleteProjectById(p.id)}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                        <h3>{p.name}</h3>
+                        <small>
+                          <MapPin size={13} />
+                          {p.city}
+                          {p.targetDate ? ` · ${p.targetDate}` : ""}
+                        </small>
+                        <div className="progress">
+                          <span>نسبة الإنجاز</span>
+                          <b>{p.progress}%</b>
+                        </div>
+                        <div className="track">
+                          <i style={{ width: p.progress + "%" }} />
+                        </div>
                       </div>
                     </div>
-                  </button>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
 
-          {/* CERTIFICATES SUMMARY */}
+          {/* ==================== CERTIFICATES SUMMARY (WITH FULL CRUD) ==================== */}
           {tab === "certificates" && (
             <section className="mh-panel" style={{ marginBottom: 16 }}>
               <div className="mh-panel-title">
                 <div>
                   <small className="eyebrow">QUALIFICATIONS &amp; CREDENTIALS</small>
-                  <h3>المؤهل العلمي والاعتمادات المسجلة من السيرة الذاتية</h3>
+                  <h3>المؤهل العلمي والشهادات والاعتمادات المسجلة</h3>
                 </div>
-                <button
-                  type="button"
-                  className="sa-btn-subtle active"
-                  onClick={() => nav("cv")}
-                >
-                  عرض السيرة الذاتية <ChevronLeft size={14} />
-                </button>
+                <div className="mh-btn-row">
+                  <button
+                    type="button"
+                    className="sa-btn-subtle active"
+                    onClick={() => setAddingCert(true)}
+                  >
+                    <Plus size={14} /> إضافة شهادة جديدة
+                  </button>
+                  <button
+                    type="button"
+                    className="sa-btn-subtle"
+                    onClick={() => nav("cv")}
+                  >
+                    عرض السيرة الذاتية <ChevronLeft size={14} />
+                  </button>
+                </div>
               </div>
               <div className="mh-cv-projects-grid">
-                {cv.certifications.map((cert) => (
-                  <div key={cert.id} className="mh-inset-card">
-                    <span className="mh-pill accent">{cert.category}</span>
-                    <h4 style={{ margin: "8px 0 4px" }}>{cert.title}</h4>
-                    <small>{cert.issuer}</small>
-                    <small style={{ marginTop: 6, fontWeight: 600 }}>{cert.year}</small>
-                  </div>
-                ))}
+                {cv.certifications.map((cert) => {
+                  const shown = cert.selectedForDisplay !== false;
+                  return (
+                    <div key={cert.id} className="mh-inset-card">
+                      <div className="mh-flex-between" style={{ gap: 6 }}>
+                        <span className="mh-pill accent">
+                          <Award size={12} /> {cert.category}
+                        </span>
+                        <div className="mh-card-inline-tools">
+                          <button
+                            type="button"
+                            className={`mh-display-chip ${shown ? "on" : ""}`}
+                            onClick={() => toggleCertDisplay(cert.id)}
+                          >
+                            {shown ? "معروضة" : "مخفية"}
+                          </button>
+                          <button
+                            type="button"
+                            className="mh-icon-tiny"
+                            title="تعديل الشهادة"
+                            onClick={() => setEditingCert(cert)}
+                          >
+                            <Edit3 size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            className="mh-icon-tiny danger"
+                            title="حذف الشهادة"
+                            onClick={() => deleteCertById(cert.id)}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                      <h4 style={{ margin: "8px 0 4px" }}>{cert.title}</h4>
+                      <small>{cert.issuer}</small>
+                      <small style={{ marginTop: 6, fontWeight: 600 }}>
+                        {cert.year}
+                      </small>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}
 
-          {/* FILES / SAMPLES / CERTIFICATES / O&M SITE FILES */}
+          {/* ==================== FILES / SAMPLES / CERTIFICATES / O&M SITE FILES ==================== */}
           {(tab === "overview" ||
             tab === "files" ||
             tab === "samples" ||
@@ -1013,44 +1874,131 @@ export default function App() {
             <>
               <div className="heading">
                 <div>
-                  <small className="eyebrow">FILE ARCHIVE</small>
+                  <small className="eyebrow">
+                    {tab === "samples"
+                      ? "CURATED WORK SAMPLES · اختيار العينات والاطلاع عليها قبل المشاركة"
+                      : "FILE ARCHIVE & UNIVERSAL PREVIEW"}
+                  </small>
                   <h2>
                     {tab === "overview"
-                      ? "أحدث الملفات والمخططات"
+                      ? "أحدث الملفات والمخططات (اضغط على أي ملف للمعاينة)"
                       : tab === "om"
                         ? "ملفات ومخططات المواقع والتشغيل"
                         : activeTabLabel}
                   </h2>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (tab === "overview") nav("files");
-                    else {
-                      setPid("");
-                      setModal("upload");
-                    }
-                  }}
-                >
-                  {tab === "overview" ? "عرض المكتبة" : "رفع ملفات"}{" "}
-                  <ChevronLeft size={15} />
-                </button>
+                <div className="mh-btn-row">
+                  {tab === "samples" && (
+                    <button
+                      type="button"
+                      className="primary mh-btn-nomargin"
+                      onClick={() => setShowShareModal(true)}
+                    >
+                      <Share2 size={15} /> معاينة المختار قبل المشاركة (
+                      {selectedSampleCount})
+                    </button>
+                  )}
+                  {tab === "files" && (
+                    <button
+                      type="button"
+                      className="sa-btn-subtle"
+                      onClick={() => {
+                        updateFiles(DEFAULT_SAMPLE_FILES);
+                        setMsg("تمت استعادة الملفات الافتراضية");
+                      }}
+                    >
+                      <RotateCcw size={14} /> استعادة الافتراضي
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (tab === "overview") nav("files");
+                      else {
+                        setPid("");
+                        setModal("upload");
+                      }
+                    }}
+                  >
+                    {tab === "overview" ? "عرض المكتبة" : "رفع ملف ومعاينته"}{" "}
+                    <ChevronLeft size={15} />
+                  </button>
+                </div>
               </div>
+
+              {/* Dedicated Sample Curation Bar in Samples Tab */}
+              {tab === "samples" && (
+                <section
+                  className="mh-panel mh-sample-curation-bar"
+                  style={{ marginBottom: 14 }}
+                >
+                  <div>
+                    <b>
+                      العينات المختارة للعرض والمشاركة: {selectedSampleCount} من
+                      أصل {sampleFilesAll.length}
+                    </b>
+                    <small>
+                      فعّل العينات التي ترغب بعرضها واضغط «الاطلاع على العرض قبل
+                      المشاركة» لمراجعة كل شيء قبل الإرسال.
+                    </small>
+                  </div>
+                  <div className="mh-btn-row">
+                    <button
+                      type="button"
+                      className="sa-btn-subtle"
+                      onClick={() =>
+                        updateFiles(
+                          files.map((f) =>
+                            f.cat === "عينات الأعمال"
+                              ? { ...f, selectedForDisplay: true }
+                              : f
+                          )
+                        )
+                      }
+                    >
+                      <CheckSquare size={14} /> تحديد الكل
+                    </button>
+                    <button
+                      type="button"
+                      className="sa-btn-subtle"
+                      onClick={() =>
+                        updateFiles(
+                          files.map((f) =>
+                            f.cat === "عينات الأعمال"
+                              ? { ...f, selectedForDisplay: false }
+                              : f
+                          )
+                        )
+                      }
+                    >
+                      <Square size={14} /> إلغاء تحديد الكل
+                    </button>
+                    <button
+                      type="button"
+                      className="sa-btn-subtle active"
+                      onClick={() => setShowShareModal(true)}
+                    >
+                      <Eye size={14} /> الاطلاع على العرض قبل المشاركة
+                    </button>
+                  </div>
+                </section>
+              )}
+
               {tab !== "overview" && (
                 <div className="search">
                   <Search size={17} />
                   <input
-                    placeholder="ابحث باسم الملف…"
+                    placeholder="ابحث باسم الملف أو التصنيف…"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
                   />
                 </div>
               )}
               <div className="list">
-                {rows(
+                {renderFileRows(
                   files
                     .filter((f) => {
-                      const matchesQuery = f.name
+                      const matchesQuery = `${f.name} ${f.cat}`
                         .toLowerCase()
                         .includes(q.trim().toLowerCase());
                       if (!matchesQuery) return false;
@@ -1060,27 +2008,31 @@ export default function App() {
                       if (tab === "om") {
                         return (
                           f.cat === "التشغيل والصيانة" ||
-                          projects.some((p) => isOmProject(p) && p.id === f.project)
+                          projects.some(
+                            (p) => isOmProject(p) && p.id === f.project
+                          )
                         );
                       }
                       return true;
                     })
-                    .slice(0, tab === "overview" ? 4 : undefined)
+                    .slice(0, tab === "overview" ? 5 : undefined),
+                  tab === "samples"
                 )}
               </div>
             </>
           )}
 
-          {/* SMART ARCHIVE TAB */}
+          {/* ==================== SMART ARCHIVE TAB ==================== */}
           {tab === "archive" && (
             <SmartArchiveView
               projects={projects}
               onNotify={setMsg}
               onArchiveCountChange={setSmartArchiveCount}
+              onPromoteToSample={handlePromoteArchiveToSample}
             />
           )}
 
-          {/* COMPREHENSIVE SETTINGS & SYNC TAB */}
+          {/* ==================== COMPREHENSIVE SETTINGS & SYNC TAB ==================== */}
           {tab === "settings" && (
             <SettingsView
               key={settingsSection}
@@ -1103,7 +2055,28 @@ export default function App() {
         </article>
       </main>
 
-      {/* Modals: New Project / Upload File / Project Details */}
+      {/* ==================== UNIVERSAL IN-APP FILE PREVIEW MODAL ==================== */}
+      <UniversalFilePreviewModal
+        target={previewTarget}
+        onClose={() => setPreviewTarget(null)}
+      />
+
+      {/* ==================== PRE-SHARE SHOWCASE & SAMPLE SELECTOR MODAL ==================== */}
+      <ShareShowcaseModal
+        open={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        cv={cv}
+        profile={settings.profile}
+        files={files}
+        projects={projects}
+        onToggleFileDisplay={toggleFileDisplay}
+        onToggleProjectDisplay={toggleProjectDisplay}
+        onToggleCertDisplay={toggleCertDisplay}
+        onPreviewFile={previewLibraryFile}
+        onNotify={setMsg}
+      />
+
+      {/* ==================== MODALS: NEW PROJECT / UPLOAD FILE / PROJECT DETAILS ==================== */}
       {modal && (
         <div className="overlay" onClick={() => !busy && setModal("")}>
           <section
@@ -1122,7 +2095,7 @@ export default function App() {
               {modal === "new"
                 ? "إضافة مشروع هندسي جديد"
                 : modal === "upload"
-                  ? "رفع ملفات ومخططات"
+                  ? "رفع ملفات ومخططات (مع معاينة فورية)"
                   : project?.name}
             </h2>
             {modal === "new" ? (
@@ -1139,6 +2112,10 @@ export default function App() {
                       client: String(f.get("client") || ""),
                       discipline: String(f.get("discipline") || ""),
                       notes: String(f.get("notes") || ""),
+                      targetDate:
+                        String(f.get("targetDate") || "").trim() ||
+                        defaultDateInMonth(activeMonth, 20),
+                      selectedForDisplay: f.get("selectedForDisplay") === "on",
                       type,
                       art: type.includes("Revit")
                         ? 2
@@ -1151,12 +2128,16 @@ export default function App() {
                     ...projects,
                   ]);
                   setModal("");
-                  setMsg("تمت إضافة المشروع ومزامنته");
+                  setMsg("تمت إضافة المشروع وربطه بالتقويم");
                 }}
               >
                 <label>
                   اسم المشروع
-                  <input name="name" required placeholder="مثال: توسعة مبنى العيادات..." />
+                  <input
+                    name="name"
+                    required
+                    placeholder="مثال: توسعة مبنى العيادات..."
+                  />
                 </label>
                 <label>
                   المدينة / الموقع
@@ -1173,7 +2154,8 @@ export default function App() {
                     defaultValue={
                       tab === "om"
                         ? "تشغيل وصيانة كهرباء"
-                        : settings.workspace.customDisciplines[0] || "AutoCAD MEP"
+                        : settings.workspace.customDisciplines[0] ||
+                          "AutoCAD MEP"
                     }
                   >
                     {settings.workspace.customDisciplines.map((d) => (
@@ -1185,11 +2167,44 @@ export default function App() {
                 </label>
                 <label>
                   نطاق العمل (مثال: HVAC / لوحات كهرباء / Shop Drawings)
-                  <input name="discipline" placeholder="تكييف وكهرباء ومكافحة حريق" />
+                  <input
+                    name="discipline"
+                    placeholder="تكييف وكهرباء ومكافحة حريق"
+                  />
+                </label>
+                <label>
+                  تاريخ المتابعة (مرتبط بالتقويم الشهري)
+                  <input
+                    name="targetDate"
+                    type="date"
+                    defaultValue={defaultDateInMonth(activeMonth, 20)}
+                  />
                 </label>
                 <label>
                   نسبة الإنجاز المبدئية (%)
-                  <input name="progress" type="number" min={0} max={100} defaultValue={10} />
+                  <input
+                    name="progress"
+                    type="number"
+                    min={0}
+                    max={100}
+                    defaultValue={10}
+                  />
+                </label>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginTop: 10,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    name="selectedForDisplay"
+                    style={{ width: 16, height: 16, margin: 0 }}
+                    defaultChecked
+                  />
+                  <span>إظهار المشروع في صفحة المشاركة</span>
                 </label>
                 <button className="primary">إضافة المشروع</button>
               </form>
@@ -1200,26 +2215,48 @@ export default function App() {
                   const data = new FormData(e.currentTarget);
                   setBusy(true);
                   try {
-                    const d = await filesDb;
+                    const cat = String(data.get("cat"));
+                    const projId = String(data.get("pid") || "");
+                    const dueDate = String(data.get("dueDate") || "");
+                    const selectedForDisplay =
+                      data.get("selectedForDisplay") === "on";
+                    const created: LibraryFileItem[] = [];
+                    let firstBlob: Blob | null = null;
+
                     for (const blob of Array.from(input.current!.files || [])) {
                       const m: LibraryFileItem = {
                         id: crypto.randomUUID(),
                         name: blob.name,
                         date: Date.now(),
                         size: blob.size,
-                        cat: String(data.get("cat")),
-                        project: String(data.get("pid")),
+                        mimeType: blob.type || undefined,
+                        cat,
+                        project: projId,
+                        dueDate: dueDate || defaultDateInMonth(activeMonth, 15),
+                        selectedForDisplay,
                       };
-                      await new Promise((ok, no) => {
-                        const t = d.transaction("files", "readwrite");
-                        t.objectStore("files").put({ ...m, blob });
-                        t.oncomplete = () => ok(true);
-                        t.onabort = () => no(t.error);
-                      });
-                      setFiles((prev) => [m, ...prev]);
+                      await putStoredFileBlob(m, blob);
+                      if (!firstBlob) firstBlob = blob;
+                      created.push(m);
                     }
-                    setModal("");
-                    setMsg("تم حفظ الملفات بنجاح");
+
+                    if (created.length > 0) {
+                      updateFiles([...created, ...files]);
+                      setModal("");
+                      // Open Universal Preview right away!
+                      if (firstBlob) {
+                        setPreviewTarget({
+                          id: created[0].id,
+                          name: created[0].name,
+                          size: created[0].size,
+                          mimeType: created[0].mimeType,
+                          blob: firstBlob,
+                          category: created[0].cat,
+                          addedAt: created[0].date,
+                        });
+                      }
+                      setMsg("تم حفظ الملفات وفتح المعاينة الفورية");
+                    }
                   } catch {
                     setMsg("تعذر الحفظ. تحقق من مساحة التخزين المتاحة.");
                   } finally {
@@ -1227,8 +2264,15 @@ export default function App() {
                   }
                 }}
               >
-                <p>يدعم DWG وRVT وPDF وExcel والصور وكافة الصيغ الهندسية.</p>
-                <button type="button" className="mh-choice-pill" onClick={() => nav("archive")}>
+                <p>
+                  يدعم معاينة كافة الصيغ: PDF، Excel، Word، PowerPoint، CSV،
+                  DXF، IFC، DWG، RVT، الصور، الفيديو، الصوت، ZIP والملفات النصية.
+                </p>
+                <button
+                  type="button"
+                  className="mh-choice-pill"
+                  onClick={() => nav("archive")}
+                >
                   للتصنيف التلقائي حسب محتوى الملف: افتح الأرشيف الذكي
                 </button>
                 <input ref={input} type="file" multiple required />
@@ -1263,8 +2307,37 @@ export default function App() {
                     ))}
                   </select>
                 </label>
+                <label>
+                  تاريخ الوثيقة (مرتبط بالتقويم الشهري)
+                  <input
+                    name="dueDate"
+                    type="date"
+                    defaultValue={defaultDateInMonth(
+                      activeMonth,
+                      new Date().getDate()
+                    )}
+                  />
+                </label>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginTop: 10,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    name="selectedForDisplay"
+                    style={{ width: 16, height: 16, margin: 0 }}
+                    defaultChecked={
+                      tab === "samples" || tab === "certificates"
+                    }
+                  />
+                  <span>إظهار الملف ضمن العينات المختارة للمشاركة</span>
+                </label>
                 <button className="primary" disabled={busy}>
-                  {busy ? "جارٍ الحفظ…" : "حفظ الملفات"}
+                  {busy ? "جارٍ الحفظ…" : "حفظ ومعاينة الملف"}
                 </button>
               </form>
             ) : (
@@ -1273,6 +2346,9 @@ export default function App() {
                   <p>
                     {project.city} · {project.type}
                     {project.client ? ` · ${project.client}` : ""}
+                    {project.targetDate
+                      ? ` · المتابعة: ${project.targetDate}`
+                      : ""}
                   </p>
                   {project.notes && (
                     <div className="sa-notes-box">
@@ -1295,23 +2371,31 @@ export default function App() {
                     />
                   </label>
                   <h3>ملفات المشروع</h3>
-                  {rows(files.filter((f) => f.project === pid))}
+                  {renderFileRows(files.filter((f) => f.project === pid))}
                   <div className="mh-flex-between" style={{ marginTop: 14 }}>
-                    <button
-                      type="button"
-                      className="primary mh-btn-nomargin"
-                      onClick={() => setModal("upload")}
-                    >
-                      <Upload size={15} /> رفع ملفات للمشروع
-                    </button>
+                    <div className="mh-btn-row">
+                      <button
+                        type="button"
+                        className="primary mh-btn-nomargin"
+                        onClick={() => setModal("upload")}
+                      >
+                        <Upload size={15} /> رفع ملفات للمشروع
+                      </button>
+                      <button
+                        type="button"
+                        className="sa-btn-subtle active"
+                        onClick={() => {
+                          setModal("");
+                          setEditingProject(project);
+                        }}
+                      >
+                        <Edit3 size={15} /> تعديل بيانات المشروع
+                      </button>
+                    </div>
                     <button
                       type="button"
                       className="sa-delete-btn"
-                      onClick={() => {
-                        updateProjects(projects.filter((p) => p.id !== pid));
-                        setModal("");
-                        setMsg("تم حذف المشروع");
-                      }}
+                      onClick={() => deleteProjectById(pid)}
                     >
                       <Trash2 size={14} /> حذف المشروع
                     </button>
@@ -1323,13 +2407,371 @@ export default function App() {
         </div>
       )}
 
-      <DevAssistant
-        context={{ dashboardName: settings.dashboardName, currentTab: tab,
-          projectCount: projects.length, workOrderCount: workOrders.length,
-          fileCount: files.length, archiveCount: smartArchiveCount }}
-        onAction={handleAssistantAction}
-        onOpenSettings={() => nav("settings", "assistant")}
-      />
+      {/* ==================== EDIT PROJECT MODAL ==================== */}
+      {editingProject && (
+        <div className="overlay" onClick={() => setEditingProject(null)}>
+          <section
+            className="dialog sa-wide-dialog"
+            role="dialog"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="close"
+              onClick={() => setEditingProject(null)}
+            >
+              <X />
+            </button>
+            <h2>تعديل بيانات المشروع الهندسي</h2>
+            <form onSubmit={handleSaveProjectEdit}>
+              <div className="mh-form-grid">
+                <label>
+                  اسم المشروع (عربي)
+                  <input
+                    name="name"
+                    required
+                    defaultValue={editingProject.name}
+                  />
+                </label>
+                <label>
+                  اسم المشروع (إنجليزي — اختياري)
+                  <input
+                    name="nameEn"
+                    dir="ltr"
+                    defaultValue={editingProject.nameEn || ""}
+                  />
+                </label>
+                <label>
+                  المدينة / الموقع
+                  <input
+                    name="city"
+                    required
+                    defaultValue={editingProject.city}
+                  />
+                </label>
+                <label>
+                  العميل / الجهة المالكة
+                  <input
+                    name="client"
+                    defaultValue={editingProject.client || ""}
+                  />
+                </label>
+                <label>
+                  نوع العمل / التخصص الرئيسي
+                  <input
+                    name="type"
+                    required
+                    defaultValue={editingProject.type}
+                  />
+                </label>
+                <label>
+                  التخصص التفصيلي
+                  <input
+                    name="discipline"
+                    defaultValue={editingProject.discipline || ""}
+                  />
+                </label>
+                <label>
+                  نسبة الإنجاز (%)
+                  <input
+                    name="progress"
+                    type="number"
+                    min={0}
+                    max={100}
+                    defaultValue={editingProject.progress}
+                  />
+                </label>
+                <label>
+                  تاريخ المتابعة (مرتبط بالتقويم الشهري)
+                  <input
+                    name="targetDate"
+                    type="date"
+                    defaultValue={
+                      editingProject.targetDate ||
+                      defaultDateInMonth(activeMonth, 20)
+                    }
+                  />
+                </label>
+                <label className="mh-span-2">
+                  نطاق العمل والملاحظات
+                  <textarea
+                    name="notes"
+                    rows={3}
+                    defaultValue={editingProject.notes || ""}
+                  />
+                </label>
+                <label
+                  className="mh-span-2"
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <input
+                    type="checkbox"
+                    name="selectedForDisplay"
+                    style={{ width: 16, height: 16, margin: 0 }}
+                    defaultChecked={editingProject.selectedForDisplay !== false}
+                  />
+                  <span>إظهار هذا المشروع ضمن البروفايل المعدّ للمشاركة</span>
+                </label>
+              </div>
+              <div className="mh-flex-between" style={{ marginTop: 14 }}>
+                <button type="submit" className="primary mh-btn-nomargin">
+                  <Check size={15} /> حفظ تعديلات المشروع
+                </button>
+                <button
+                  type="button"
+                  className="sa-delete-btn"
+                  onClick={() => deleteProjectById(editingProject.id)}
+                >
+                  <Trash2 size={14} /> حذف المشروع
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {/* ==================== EDIT LIBRARY FILE / SAMPLE MODAL ==================== */}
+      {editingFile && (
+        <div className="overlay" onClick={() => setEditingFile(null)}>
+          <section
+            className="dialog"
+            role="dialog"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="close"
+              onClick={() => setEditingFile(null)}
+            >
+              <X />
+            </button>
+            <h2>تعديل بيانات الملف / العينة</h2>
+            <form onSubmit={handleSaveFileEdit}>
+              <label>
+                اسم الملف المعروض
+                <input name="name" required defaultValue={editingFile.name} />
+              </label>
+              <label>
+                التصنيف
+                <select name="cat" defaultValue={editingFile.cat}>
+                  <option>مكتبة الملفات</option>
+                  <option>عينات الأعمال</option>
+                  <option>التشغيل والصيانة</option>
+                  <option>الشهادات</option>
+                  <option>السيرة الذاتية</option>
+                </select>
+              </label>
+              <label>
+                المشروع المرتبط
+                <select name="project" defaultValue={editingFile.project || ""}>
+                  <option value="">بدون مشروع</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                التاريخ المرتبط بالتقويم الشهري
+                <input
+                  name="dueDate"
+                  type="date"
+                  defaultValue={
+                    editingFile.dueDate || defaultDateInMonth(activeMonth, 15)
+                  }
+                />
+              </label>
+              <label>
+                ملاحظات فنية (تظهر في صفحة المشاركة والمعاينة)
+                <textarea
+                  name="notes"
+                  rows={2}
+                  defaultValue={editingFile.notes || ""}
+                />
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginTop: 10,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  name="selectedForDisplay"
+                  style={{ width: 16, height: 16, margin: 0 }}
+                  defaultChecked={editingFile.selectedForDisplay !== false}
+                />
+                <span>إظهار هذه العينة عند مشاركة البروفايل</span>
+              </label>
+
+              <div className="mh-btn-row" style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="sa-btn-subtle"
+                  onClick={() => previewLibraryFile(editingFile)}
+                >
+                  <Eye size={14} /> معاينة الملف الحالي
+                </button>
+                <button
+                  type="button"
+                  className="sa-btn-subtle"
+                  onClick={() => replaceFileInput.current?.click()}
+                >
+                  <Upload size={14} /> استبدال الملف بملف جديد من جهازك
+                </button>
+              </div>
+
+              <div className="mh-flex-between" style={{ marginTop: 16 }}>
+                <button type="submit" className="primary mh-btn-nomargin">
+                  <Check size={15} /> حفظ التعديلات
+                </button>
+                <button
+                  type="button"
+                  className="sa-delete-btn"
+                  onClick={() => deleteFileItem(editingFile)}
+                >
+                  <Trash2 size={14} /> حذف الملف
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {/* ==================== ADD / EDIT CERTIFICATE MODALS ==================== */}
+      {addingCert && (
+        <div className="overlay" onClick={() => setAddingCert(false)}>
+          <section
+            className="dialog"
+            role="dialog"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="close"
+              onClick={() => setAddingCert(false)}
+            >
+              <X />
+            </button>
+            <h2>إضافة شهادة أو اعتماد جديد</h2>
+            <form onSubmit={handleCreateCert}>
+              <label>
+                عنوان الشهادة / الاعتماد
+                <input
+                  name="title"
+                  required
+                  placeholder="مثال: دورة Revit MEP المتقدمة..."
+                />
+              </label>
+              <label>
+                الجهة المانحة
+                <input
+                  name="issuer"
+                  required
+                  placeholder="Autodesk / جهة معتمدة"
+                />
+              </label>
+              <label>
+                الفئة
+                <input name="category" defaultValue="اعتماد هندسي" />
+              </label>
+              <label>
+                السنة / الفترة
+                <input name="year" defaultValue="2026" />
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginTop: 10,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  name="selectedForDisplay"
+                  style={{ width: 16, height: 16, margin: 0 }}
+                  defaultChecked
+                />
+                <span>إظهار الشهادة في صفحة المشاركة</span>
+              </label>
+              <button className="primary">إضافة الشهادة</button>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {editingCert && (
+        <div className="overlay" onClick={() => setEditingCert(null)}>
+          <section
+            className="dialog"
+            role="dialog"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="close"
+              onClick={() => setEditingCert(null)}
+            >
+              <X />
+            </button>
+            <h2>تعديل الشهادة / الاعتماد</h2>
+            <form onSubmit={handleSaveCertEdit}>
+              <label>
+                عنوان الشهادة / الاعتماد
+                <input name="title" required defaultValue={editingCert.title} />
+              </label>
+              <label>
+                الجهة المانحة
+                <input
+                  name="issuer"
+                  required
+                  defaultValue={editingCert.issuer}
+                />
+              </label>
+              <label>
+                الفئة
+                <input name="category" defaultValue={editingCert.category} />
+              </label>
+              <label>
+                السنة / الفترة
+                <input name="year" defaultValue={editingCert.year} />
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginTop: 10,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  name="selectedForDisplay"
+                  style={{ width: 16, height: 16, margin: 0 }}
+                  defaultChecked={editingCert.selectedForDisplay !== false}
+                />
+                <span>إظهار الشهادة في صفحة المشاركة</span>
+              </label>
+              <div className="mh-flex-between" style={{ marginTop: 14 }}>
+                <button type="submit" className="primary mh-btn-nomargin">
+                  <Check size={15} /> حفظ التعديلات
+                </button>
+                <button
+                  type="button"
+                  className="sa-delete-btn"
+                  onClick={() => deleteCertById(editingCert.id)}
+                >
+                  <Trash2 size={14} /> حذف الشهادة
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
 
       {msg && (
         <div className="toast">

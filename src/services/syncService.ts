@@ -1,18 +1,23 @@
 import {
+  CalendarEventItem,
   CvProfileData,
   DashboardSettings,
+  LibraryFileItem,
   MhmedSyncSnapshot,
   OmWorkOrder,
   ProjectItem,
   SyncConfig,
 } from "../types/mhmed";
 import {
+  DEFAULT_CALENDAR_EVENTS,
   DEFAULT_CV_DATA,
   DEFAULT_OM_WORK_ORDERS,
   DEFAULT_PROJECTS,
+  DEFAULT_SAMPLE_FILES,
   DEFAULT_SETTINGS,
   DEFAULT_SYNC_CONFIG,
 } from "../data/mhmedSeedData";
+import { todayMonthKey } from "../utils/date";
 
 const KEYS = {
   settings: "mhmed-settings-v2",
@@ -20,6 +25,9 @@ const KEYS = {
   projects: "mhmed-projects-v2",
   legacyProjects: "mimar-projects",
   workOrders: "mhmed-workorders-v2",
+  calendarEvents: "mhmed-calendar-events-v2",
+  filesMeta: "mhmed-files-meta-v2",
+  activeMonth: "mhmed-active-month-v2",
   syncConfig: "mhmed-sync-config-v2",
   deviceId: "mhmed-device-id",
 };
@@ -99,9 +107,9 @@ export function saveCvData(cv: CvProfileData): void {
 export function loadProjects(): ProjectItem[] {
   try {
     const raw = localStorage.getItem(KEYS.projects);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
     return DEFAULT_PROJECTS;
   } catch {
@@ -116,7 +124,7 @@ export function saveProjects(projects: ProjectItem[]): void {
 export function loadWorkOrders(): OmWorkOrder[] {
   try {
     const raw = localStorage.getItem(KEYS.workOrders);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
     }
@@ -128,6 +136,60 @@ export function loadWorkOrders(): OmWorkOrder[] {
 
 export function saveWorkOrders(orders: OmWorkOrder[]): void {
   localStorage.setItem(KEYS.workOrders, JSON.stringify(orders));
+}
+
+export function loadCalendarEvents(): CalendarEventItem[] {
+  try {
+    const raw = localStorage.getItem(KEYS.calendarEvents);
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+    return DEFAULT_CALENDAR_EVENTS;
+  } catch {
+    return DEFAULT_CALENDAR_EVENTS;
+  }
+}
+
+export function saveCalendarEvents(events: CalendarEventItem[]): void {
+  localStorage.setItem(KEYS.calendarEvents, JSON.stringify(events));
+}
+
+export function loadLibraryFilesMeta(): LibraryFileItem[] | null {
+  try {
+    const raw = localStorage.getItem(KEYS.filesMeta);
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLibraryFilesMeta(files: LibraryFileItem[]): void {
+  localStorage.setItem(KEYS.filesMeta, JSON.stringify(files));
+}
+
+export function loadActiveMonth(): string {
+  try {
+    const raw = localStorage.getItem(KEYS.activeMonth);
+    if (raw && /^\d{4}-\d{2}$/.test(raw)) return raw;
+    return todayMonthKey();
+  } catch {
+    return todayMonthKey();
+  }
+}
+
+export function saveActiveMonth(monthKey: string): void {
+  try {
+    if (/^\d{4}-\d{2}$/.test(monthKey)) {
+      localStorage.setItem(KEYS.activeMonth, monthKey);
+    }
+  } catch {
+    // ignore storage quota errors
+  }
 }
 
 export function loadSyncConfig(): SyncConfig {
@@ -237,7 +299,10 @@ export function buildSyncSnapshot(
   settings: DashboardSettings,
   cv: CvProfileData,
   projects: ProjectItem[],
-  workOrders: OmWorkOrder[]
+  workOrders: OmWorkOrder[],
+  calendarEvents?: CalendarEventItem[],
+  libraryFiles?: LibraryFileItem[],
+  activeMonth?: string
 ): MhmedSyncSnapshot {
   return {
     schemaVersion: 2,
@@ -248,6 +313,9 @@ export function buildSyncSnapshot(
     cv,
     projects,
     workOrders,
+    calendarEvents: calendarEvents ?? loadCalendarEvents(),
+    libraryFiles: libraryFiles ?? loadLibraryFilesMeta() ?? DEFAULT_SAMPLE_FILES,
+    activeMonth: activeMonth ?? loadActiveMonth(),
   };
 }
 
@@ -274,6 +342,14 @@ export function parseAndValidateSnapshot(raw: unknown): MhmedSyncSnapshot {
     cv: { ...DEFAULT_CV_DATA, ...obj.cv },
     projects: obj.projects,
     workOrders: Array.isArray(obj.workOrders) ? obj.workOrders : DEFAULT_OM_WORK_ORDERS,
+    calendarEvents: Array.isArray(obj.calendarEvents)
+      ? obj.calendarEvents
+      : DEFAULT_CALENDAR_EVENTS,
+    libraryFiles: Array.isArray(obj.libraryFiles) ? obj.libraryFiles : undefined,
+    activeMonth:
+      typeof obj.activeMonth === "string" && /^\d{4}-\d{2}$/.test(obj.activeMonth)
+        ? obj.activeMonth
+        : undefined,
   };
 }
 
@@ -320,10 +396,21 @@ export function subscribeTabSync(onSnapshot: (snap: MhmedSyncSnapshot) => void):
       e.key === KEYS.settings ||
       e.key === KEYS.cv ||
       e.key === KEYS.projects ||
-      e.key === KEYS.workOrders
+      e.key === KEYS.workOrders ||
+      e.key === KEYS.calendarEvents ||
+      e.key === KEYS.filesMeta ||
+      e.key === KEYS.activeMonth
     ) {
       onSnapshot(
-        buildSyncSnapshot(loadSettings(), loadCvData(), loadProjects(), loadWorkOrders())
+        buildSyncSnapshot(
+          loadSettings(),
+          loadCvData(),
+          loadProjects(),
+          loadWorkOrders(),
+          loadCalendarEvents(),
+          loadLibraryFilesMeta() ?? DEFAULT_SAMPLE_FILES,
+          loadActiveMonth()
+        )
       );
     }
   };
@@ -354,7 +441,6 @@ export async function pushToGitHubGist(
 
   let targetGistId = gistId.trim();
 
-  // If no gistId yet, look for an existing mhmed-dashboard-sync.json gist first
   if (!targetGistId) {
     const listRes = await fetch("https://api.github.com/gists?per_page=30", { headers });
     if (!listRes.ok) {
