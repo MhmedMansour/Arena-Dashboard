@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import SmartArchiveView from "./components/SmartArchiveView";
 import DevAssistant from "./components/DevAssistant";
+import WorkCalendar from "./components/WorkCalendar";
 import CvProfileView from "./components/CvProfileView";
 import OmExecutionView from "./components/OmExecutionView";
 import SettingsView, { SettingsSubTab } from "./components/SettingsView";
@@ -712,55 +713,58 @@ export default function App() {
           {/* OVERVIEW TAB */}
           {tab === "overview" && (
             <>
-              <section className="hero">
-                {settings.appearance.showBlueprint && (
-                  <figure className="blueprint">
-                    <b>FIG. 01 / MEP CAD &amp; REVIT STUDY</b>
-                    <img
-                      src="./art/0.svg"
-                      alt="رسم هندسي بمنظور متساوي القياس"
-                    />
-                    <figcaption>
-                      AUTOCAD · REVIT MEP <span>1 : 200</span>
-                    </figcaption>
-                  </figure>
-                )}
-                <div className="mh-hero-content">
-                  <label>● &nbsp; {settings.heroBadge}</label>
-                  <h1>{settings.heroTitle}</h1>
-                  <p>{settings.heroSubtitle}</p>
-                  <div className="actions">
-                    <button
-                      type="button"
-                      className="cream"
-                      onClick={() => setModal("new")}
-                    >
-                      <Plus size={16} /> مشروع جديد
-                    </button>
-                    <button
-                      type="button"
-                      className="outline"
-                      onClick={() => nav("cv")}
-                    >
-                      <UserCheck size={16} /> السيرة الذاتية (CV)
-                    </button>
-                    <button
-                      type="button"
-                      className="outline"
-                      onClick={() => nav("om")}
-                    >
-                      <Zap size={16} /> تشغيل وصيانة MEP
-                    </button>
-                    <button
-                      type="button"
-                      className="outline"
-                      onClick={() => nav("archive")}
-                    >
-                      <FolderArchive size={16} /> الأرشيف الذكي
-                    </button>
+              <div className="mh-overview-top">
+                <WorkCalendar />
+                <section className="hero">
+                  {settings.appearance.showBlueprint && (
+                    <figure className="blueprint">
+                      <b>FIG. 01 / MEP CAD &amp; REVIT STUDY</b>
+                      <img
+                        src="./art/0.svg"
+                        alt="رسم هندسي بمنظور متساوي القياس"
+                      />
+                      <figcaption>
+                        AUTOCAD · REVIT MEP <span>1 : 200</span>
+                      </figcaption>
+                    </figure>
+                  )}
+                  <div className="mh-hero-content">
+                    <label>● &nbsp; {settings.heroBadge}</label>
+                    <h1>{settings.heroTitle}</h1>
+                    <p>{settings.heroSubtitle}</p>
+                    <div className="actions">
+                      <button
+                        type="button"
+                        className="cream"
+                        onClick={() => setModal("new")}
+                      >
+                        <Plus size={16} /> مشروع جديد
+                      </button>
+                      <button
+                        type="button"
+                        className="outline"
+                        onClick={() => nav("cv")}
+                      >
+                        <UserCheck size={16} /> السيرة الذاتية (CV)
+                      </button>
+                      <button
+                        type="button"
+                        className="outline"
+                        onClick={() => nav("om")}
+                      >
+                        <Zap size={16} /> تشغيل وصيانة MEP
+                      </button>
+                      <button
+                        type="button"
+                        className="outline"
+                        onClick={() => nav("archive")}
+                      >
+                        <FolderArchive size={16} /> الأرشيف الذكي
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </section>
+                </section>
+              </div>
 
               {settings.appearance.showStats && (
                 <div className="stats">

@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { CvExperience, CvProfileData, CvSkill, ProfileSettings } from "../types/mhmed";
 import { ProfileAvatar } from "./ProfileAvatar";
+import CvProjectFiles from "./CvProjectFiles";
 import {
   clearCustomCvPdf,
   loadCustomCvPdf,
@@ -824,6 +825,7 @@ export default function CvProfileView({
                         )}
                       </div>
                     )}
+                    <CvProjectFiles projectId={p.id} projectName={p.nameAr} onNotify={onNotify} />
                   </div>
                 );
               })}
