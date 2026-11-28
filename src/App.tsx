@@ -174,6 +174,8 @@ export default function App() {
   const [files, setFilesState] = useState<LibraryFileItem[]>(
     () => loadLibraryFilesMeta() ?? DEFAULT_SAMPLE_FILES
   );
+  const filesRef = useRef(files);
+  filesRef.current = files;
   const [smartArchiveCount, setSmartArchiveCount] = useState(0);
   const [projectFilter, setProjectFilter] = useState("all");
   const [modal, setModal] = useState<"" | "new" | "upload" | "detail">("");
@@ -580,6 +582,7 @@ export default function App() {
 
   function updateFiles(next: LibraryFileItem[]) {
     saveLibraryFilesMeta(next);
+    filesRef.current = next;
     setFilesState(next);
     triggerLocalAndCloudSync(
       settings,
@@ -667,7 +670,8 @@ export default function App() {
 
   /* ---------- Universal File Preview, Upload, Edit & Delete ---------- */
   async function previewLibraryFile(f: LibraryFileItem) {
-    const projName = projects.find((p) => p.id === f.project)?.name;
+    const projName = cv.cvProjects.find((p) => p.id === f.cvProjectId)?.nameAr
+      || projects.find((p) => p.id === f.project)?.name;
     // Check if there is a binary blob stored in IndexedDB (uploaded or replaced)
     const storedBlob = await getStoredFileBlob(f.id);
     if (storedBlob) {
@@ -767,10 +771,39 @@ export default function App() {
 
   async function deleteFileItem(f: LibraryFileItem) {
     await deleteStoredFileBlob(f.id);
-    updateFiles(files.filter((x) => x.id !== f.id));
+    updateFiles(filesRef.current.filter((x) => x.id !== f.id));
     if (editingFile?.id === f.id) setEditingFile(null);
     if (previewTarget?.id === f.id) setPreviewTarget(null);
     setMsg(`تم حذف الملف "${f.name}"`);
+  }
+
+  async function uploadCvProjectFiles(cvProjectId: string, uploads: File[]) {
+    if (!cv.cvProjects.some((p) => p.id === cvProjectId)) return;
+    const created: LibraryFileItem[] = [];
+    for (const raw of uploads) {
+      const item: LibraryFileItem = {
+        id: "cv-file-" + crypto.randomUUID(),
+        name: raw.name,
+        cat: "ملفات مشاريع السيرة الذاتية",
+        project: "",
+        cvProjectId,
+        size: raw.size,
+        date: Date.now(),
+        mimeType: raw.type || undefined,
+        selectedForDisplay: false,
+      };
+      try {
+        await putStoredFileBlob(item, raw);
+        created.push(item);
+      } catch {
+        // Do not show an upload as saved when its binary could not be persisted.
+      }
+    }
+    if (created.length) updateFiles([...created, ...filesRef.current]);
+    const failed = uploads.length - created.length;
+    setMsg(failed
+      ? `تم حفظ ${created.length} ملف، وتعذر حفظ ${failed}. تحقق من مساحة تخزين المتصفح وحاول مجدداً.`
+      : `تم حفظ ${created.length} ملف في مشروع السيرة الذاتية`);
   }
 
   function triggerQuickUpload(category: string) {
@@ -1100,7 +1133,7 @@ export default function App() {
             >
               <b>{f.name}</b>
               <small>
-                {projects.find((p) => p.id === f.project)?.name || f.cat}
+                {cv.cvProjects.find((p) => p.id === f.cvProjectId)?.nameAr || projects.find((p) => p.id === f.project)?.name || f.cat}
                 {f.dueDate ? ` · ${f.dueDate}` : ""}
               </small>
             </div>
@@ -1435,66 +1468,80 @@ export default function App() {
           {/* ==================== OVERVIEW TAB ==================== */}
           {tab === "overview" && (
             <>
-              <section className="hero">
-                {settings.appearance.showBlueprint && (
-                  <figure className="blueprint">
-                    <b>FIG. 01 / MEP CAD &amp; REVIT STUDY</b>
-                    <img
-                      src="./art/0.svg"
-                      alt="رسم هندسي بمنظور متساوي القياس"
-                    />
-                    <figcaption>
-                      AUTOCAD · REVIT MEP <span>1 : 200</span>
-                    </figcaption>
-                  </figure>
+              <div className={`mh-overview-top ${settings.appearance.showQuickCalendarCard === false ? "no-calendar" : ""}`}>
+                {settings.appearance.showQuickCalendarCard !== false && (
+                  <OverviewMonthCalendarCard
+                    activeMonth={activeMonth}
+                    onChangeMonth={changeActiveMonth}
+                    selectedDate={selectedDate}
+                    onSelectDate={setSelectedDate}
+                    events={calendarEvents}
+                    workOrders={workOrders}
+                    projects={projects}
+                    onOpenCalendar={() => nav("calendar")}
+                  />
                 )}
-                <div className="mh-hero-content">
-                  <div className="mh-flex-between" style={{ gap: 8 }}>
-                    <label>● &nbsp; {settings.heroBadge}</label>
-                    <button
-                      type="button"
-                      className="sa-btn-subtle"
-                      style={{ padding: "4px 10px", fontSize: 11.5 }}
-                      onClick={() => nav("settings", "brand")}
-                      title="تعديل عنوان ووصف البانر الترحيبي"
-                    >
-                      <Edit3 size={12} /> تعديل البانر
-                    </button>
+                <section className="hero">
+                  {settings.appearance.showBlueprint && (
+                    <figure className="blueprint">
+                      <b>FIG. 01 / MEP CAD &amp; REVIT STUDY</b>
+                      <img
+                        src="./art/0.svg"
+                        alt="رسم هندسي بمنظور متساوي القياس"
+                      />
+                      <figcaption>
+                        AUTOCAD · REVIT MEP <span>1 : 200</span>
+                      </figcaption>
+                    </figure>
+                  )}
+                  <div className="mh-hero-content">
+                    <div className="mh-flex-between" style={{ gap: 8 }}>
+                      <label>● &nbsp; {settings.heroBadge}</label>
+                      <button
+                        type="button"
+                        className="sa-btn-subtle"
+                        style={{ padding: "4px 10px", fontSize: 11.5 }}
+                        onClick={() => nav("settings", "brand")}
+                        title="تعديل عنوان ووصف البانر الترحيبي"
+                      >
+                        <Edit3 size={12} /> تعديل البانر
+                      </button>
+                    </div>
+                    <h1>{settings.heroTitle}</h1>
+                    <p>{settings.heroSubtitle}</p>
+                    <div className="actions">
+                      <button
+                        type="button"
+                        className="cream"
+                        onClick={() => setModal("new")}
+                      >
+                        <Plus size={16} /> مشروع جديد
+                      </button>
+                      <button
+                        type="button"
+                        className="outline"
+                        onClick={() => triggerQuickUpload("عينات الأعمال")}
+                      >
+                        <Upload size={16} /> رفع ملف ومعاينته فوراً
+                      </button>
+                      <button
+                        type="button"
+                        className="outline"
+                        onClick={() => setShowShareModal(true)}
+                      >
+                        <Share2 size={16} /> اختيار العينات ومعاينة المشاركة
+                      </button>
+                      <button
+                        type="button"
+                        className="outline"
+                        onClick={() => nav("calendar")}
+                      >
+                        <CalendarDays size={16} /> التقويم الشهري
+                      </button>
+                    </div>
                   </div>
-                  <h1>{settings.heroTitle}</h1>
-                  <p>{settings.heroSubtitle}</p>
-                  <div className="actions">
-                    <button
-                      type="button"
-                      className="cream"
-                      onClick={() => setModal("new")}
-                    >
-                      <Plus size={16} /> مشروع جديد
-                    </button>
-                    <button
-                      type="button"
-                      className="outline"
-                      onClick={() => triggerQuickUpload("عينات الأعمال")}
-                    >
-                      <Upload size={16} /> رفع ملف ومعاينته فوراً
-                    </button>
-                    <button
-                      type="button"
-                      className="outline"
-                      onClick={() => setShowShareModal(true)}
-                    >
-                      <Share2 size={16} /> اختيار العينات ومعاينة المشاركة
-                    </button>
-                    <button
-                      type="button"
-                      className="outline"
-                      onClick={() => nav("calendar")}
-                    >
-                      <CalendarDays size={16} /> التقويم الشهري
-                    </button>
-                  </div>
-                </div>
-              </section>
+                </section>
+              </div>
 
               {settings.appearance.showStats && (
                 <div className="stats">
@@ -1516,25 +1563,6 @@ export default function App() {
                       </button>
                     );
                   })}
-                </div>
-              )}
-
-              {/* Month-Linked Quick Calendar Card */}
-              {settings.appearance.showQuickCalendarCard !== false && (
-                <div style={{ marginTop: 18 }}>
-                  <OverviewMonthCalendarCard
-                    activeMonth={activeMonth}
-                    onChangeMonth={changeActiveMonth}
-                    selectedDate={selectedDate}
-                    onSelectDate={(d) => {
-                      setSelectedDate(d);
-                      nav("calendar");
-                    }}
-                    events={calendarEvents}
-                    workOrders={workOrders}
-                    projects={projects}
-                    onOpenCalendar={() => nav("calendar")}
-                  />
                 </div>
               )}
 
@@ -1639,6 +1667,11 @@ export default function App() {
               cv={cv}
               profile={settings.profile}
               onUpdateCv={updateCv}
+              files={files}
+              onUploadProjectFiles={uploadCvProjectFiles}
+              onPreviewProjectFile={previewLibraryFile}
+              onDownloadProjectFile={downloadFile}
+              onDeleteProjectFile={deleteFileItem}
               onOpenAvatarSettings={() => nav("settings", "profile")}
               onOpenShareShowcase={() => setShowShareModal(true)}
               onNotify={setMsg}
@@ -2554,6 +2587,7 @@ export default function App() {
               <label>
                 التصنيف
                 <select name="cat" defaultValue={editingFile.cat}>
+                  <option>ملفات مشاريع السيرة الذاتية</option>
                   <option>مكتبة الملفات</option>
                   <option>عينات الأعمال</option>
                   <option>التشغيل والصيانة</option>

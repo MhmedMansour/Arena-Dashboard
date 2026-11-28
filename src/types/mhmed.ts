@@ -193,6 +193,8 @@ export interface LibraryFileItem {
   isBuiltinCv?: boolean;
   /** Optional archive file id when promoted from Smart Archive */
   archiveFileId?: string;
+  /** Stable CV project association, separate from workspace project IDs. */
+  cvProjectId?: string;
   mimeType?: string;
   notes?: string;
   /** Associated calendar date YYYY-MM-DD (links file/sample to Monthly Calendar) */

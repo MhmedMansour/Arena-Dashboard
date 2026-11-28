@@ -35,6 +35,7 @@ import {
   CvSkill,
   ProfileSettings,
 } from "../types/mhmed";
+import CvProjectFiles, { CvProjectFileActions } from "./CvProjectFiles";
 import { ProfileAvatar } from "./ProfileAvatar";
 import UniversalFilePreviewModal from "./UniversalFilePreviewModal";
 import {
@@ -43,7 +44,7 @@ import {
   saveCustomCvPdf,
 } from "../services/syncService";
 
-interface CvProfileViewProps {
+interface CvProfileViewProps extends CvProjectFileActions {
   cv: CvProfileData;
   profile: ProfileSettings;
   onUpdateCv: (next: CvProfileData) => void;
@@ -61,6 +62,7 @@ export default function CvProfileView({
   onOpenAvatarSettings,
   onOpenShareShowcase,
   onNotify,
+  ...projectFileActions
 }: CvProfileViewProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CvProfileData>(cv);
@@ -1291,6 +1293,11 @@ export default function CvProfileView({
                       {p.nameEn}
                     </small>
                     <p className="mh-proj-scope">{p.scope}</p>
+                    <CvProjectFiles
+                      {...projectFileActions}
+                      projectId={p.id}
+                      projectName={p.nameAr}
+                    />
                     {hasSub && (
                       <div style={{ marginTop: 8 }}>
                         <button
