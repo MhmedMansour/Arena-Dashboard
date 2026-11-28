@@ -254,6 +254,10 @@ export async function inspectIfcStepMetadata(
     }
 
     const targets: Array<{ token: RegExp; label: string }> = [
+      { token: /=\s*IFCDUCTSEGMENT\s*\(/gi, label: "مجاري تكييف (IfcDuct)" },
+      { token: /=\s*IFCPIPESEGMENT\s*\(/gi, label: "مواسير سباكة/حريق (IfcPipe)" },
+      { token: /=\s*IFCCABLECARRIERSEGMENT\s*\(/gi, label: "حوامل كابلات (IfcCableCarrier)" },
+      { token: /=\s*IFCFLOWTERMINAL\s*\(/gi, label: "مخارج ووحدات طرفية (IfcFlowTerminal)" },
       { token: /=\s*IFCWALL(?:STANDARDCASE)?\s*\(/gi, label: "جدران (IfcWall)" },
       { token: /=\s*IFCSLAB\s*\(/gi, label: "بلاطات وأسقف (IfcSlab)" },
       { token: /=\s*IFCCOLUMN\s*\(/gi, label: "أعمدة (IfcColumn)" },

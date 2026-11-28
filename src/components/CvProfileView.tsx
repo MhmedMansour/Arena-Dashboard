@@ -24,9 +24,19 @@ import {
   ChevronDown,
   ChevronUp,
   Camera,
+  Share2,
 } from "lucide-react";
-import { CvExperience, CvProfileData, CvSkill, ProfileSettings } from "../types/mhmed";
+import {
+  CvCertification,
+  CvEducation,
+  CvExperience,
+  CvProfileData,
+  CvProjectEntry,
+  CvSkill,
+  ProfileSettings,
+} from "../types/mhmed";
 import { ProfileAvatar } from "./ProfileAvatar";
+import UniversalFilePreviewModal from "./UniversalFilePreviewModal";
 import {
   clearCustomCvPdf,
   loadCustomCvPdf,
@@ -38,6 +48,7 @@ interface CvProfileViewProps {
   profile: ProfileSettings;
   onUpdateCv: (next: CvProfileData) => void;
   onOpenAvatarSettings: () => void;
+  onOpenShareShowcase?: () => void;
   onNotify: (msg: string) => void;
 }
 
@@ -48,13 +59,17 @@ export default function CvProfileView({
   profile,
   onUpdateCv,
   onOpenAvatarSettings,
+  onOpenShareShowcase,
   onNotify,
 }: CvProfileViewProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CvProfileData>(cv);
   const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string>(BUILTIN_CV_URL);
-  const [pdfLabel, setPdfLabel] = useState<string>(cv.customPdfName || "CV_2025120123283578.pdf");
+  const [pdfLabel, setPdfLabel] = useState<string>(
+    cv.customPdfName || "CV_2025120123283578.pdf"
+  );
   const [expandedProject, setExpandedProject] = useState<string>("cvp-7");
 
   // New item forms in edit mode
@@ -75,9 +90,11 @@ export default function CvProfileView({
       if (saved?.blob) {
         const url = URL.createObjectURL(saved.blob);
         revokedUrl = url;
+        setPdfBlob(saved.blob);
         setPdfUrl(url);
         setPdfLabel(saved.name);
       } else {
+        setPdfBlob(null);
         setPdfUrl(BUILTIN_CV_URL);
         setPdfLabel("CV_2025120123283578.pdf");
       }
@@ -90,7 +107,10 @@ export default function CvProfileView({
   async function handleUploadPdf(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
+    if (
+      !file.name.toLowerCase().endsWith(".pdf") &&
+      file.type !== "application/pdf"
+    ) {
       onNotify("يرجى اختيار ملف بصيغة PDF فقط");
       return;
     }
@@ -98,7 +118,9 @@ export default function CvProfileView({
       await saveCustomCvPdf(file);
       const next = { ...cv, hasCustomPdf: true, customPdfName: file.name };
       onUpdateCv(next);
-      onNotify(`تم تحديث ملف السيرة الذاتية: ${file.name}`);
+      setPdfBlob(file);
+      setShowPdfModal(true);
+      onNotify(`تم تحديث ومعاينة ملف السيرة الذاتية: ${file.name}`);
     } catch {
       onNotify("تعذر حفظ ملف الـ PDF في التخزين المحلي");
     }
@@ -118,7 +140,7 @@ export default function CvProfileView({
   function saveEdits() {
     onUpdateCv(draft);
     setEditing(false);
-    onNotify("تم حفظ تعديلات السيرة الذاتية ومزامنتها");
+    onNotify("تم حفظ تعديلات السيرة الذاتية ومزامنتها بالكامل");
   }
 
   function addExperience() {
@@ -129,9 +151,48 @@ export default function CvProfileView({
       role: "رسام هندسي MEP / مشرف تشغيل وصيانة",
       location: "الرياض، السعودية",
       period: "2026 - حتى الآن",
+      current: false,
       highlights: ["إعداد مخططات AutoCAD & Revit والإشراف على التنفيذ والصيانة."],
     };
     setDraft({ ...draft, experiences: [item, ...draft.experiences] });
+  }
+
+  function addEducation() {
+    const item: CvEducation = {
+      id: "edu-" + Date.now(),
+      institutionAr: "اسم الجهة التعليمية",
+      institutionEn: "Institution Name",
+      year: "2024",
+      grade: "جيد جداً",
+      major: "التخصص الهندسي / الفني",
+    };
+    setDraft({ ...draft, education: [...draft.education, item] });
+  }
+
+  function addCertification() {
+    const item: CvCertification = {
+      id: "cert-" + Date.now(),
+      title: "اسم الشهادة أو الدورة المعتمدة",
+      issuer: "الجهة المانحة",
+      year: "2026",
+      category: "اعتماد هندسي",
+      selectedForDisplay: true,
+    };
+    setDraft({ ...draft, certifications: [...draft.certifications, item] });
+  }
+
+  function addCvProject() {
+    const item: CvProjectEntry = {
+      id: "cvp-" + Date.now(),
+      nameAr: "اسم المشروع الجديد",
+      nameEn: "Project Name",
+      client: "الجهة المالكة",
+      location: "الرياض، السعودية",
+      discipline: "AutoCAD & Revit MEP",
+      scope: "إعداد المخططات التنفيذية والإشراف على الأعمال الكهروميكانيكية.",
+      subLocations: [],
+    };
+    setDraft({ ...draft, cvProjects: [item, ...draft.cvProjects] });
   }
 
   function addSkill() {
@@ -230,7 +291,8 @@ export default function CvProfileView({
   <h2>التعليم والمؤهلات</h2>
   ${cv.education
     .map(
-      (e) => `<div class="item"><b>${e.institutionAr} (${e.institutionEn})</b> — ${e.year} · التقدير: ${e.grade}</div>`
+      (e) =>
+        `<div class="item"><b>${e.institutionAr} (${e.institutionEn})</b> — ${e.year} · التقدير: ${e.grade}</div>`
     )
     .join("")}
 </body>
@@ -302,7 +364,7 @@ export default function CvProfileView({
             className="primary mh-btn-nomargin"
             onClick={() => setShowPdfModal(true)}
           >
-            <Eye size={16} /> عرض CV الأصلي (PDF)
+            <Eye size={16} /> معاينة ملف السيرة (PDF)
           </button>
           <a href={pdfUrl} download={pdfLabel} className="sa-btn-subtle">
             <Download size={15} /> تنزيل PDF
@@ -312,18 +374,27 @@ export default function CvProfileView({
             className="sa-btn-subtle"
             onClick={() => pdfInputRef.current?.click()}
           >
-            <Upload size={15} /> استبدال ملف PDF
+            <Upload size={15} /> استبدال ومعاينة PDF
           </button>
           <button type="button" className="sa-btn-subtle" onClick={handlePrintCv}>
             <Printer size={15} /> طباعة نسخة منسّقة
           </button>
+          {onOpenShareShowcase && (
+            <button
+              type="button"
+              className="sa-btn-subtle active"
+              onClick={onOpenShareShowcase}
+            >
+              <Share2 size={15} /> معاينة العرض قبل المشاركة
+            </button>
+          )}
           {!editing ? (
             <button
               type="button"
               className="sa-btn-subtle active"
               onClick={() => setEditing(true)}
             >
-              <Edit3 size={15} /> تعديل بيانات السيرة
+              <Edit3 size={15} /> تعديل أو حذف أي قسم بالسيرة
             </button>
           ) : (
             <>
@@ -332,7 +403,7 @@ export default function CvProfileView({
                 className="primary mh-btn-nomargin"
                 onClick={saveEdits}
               >
-                <Check size={15} /> حفظ التعديلات
+                <Check size={15} /> حفظ جميع التعديلات
               </button>
               <button
                 type="button"
@@ -356,13 +427,13 @@ export default function CvProfileView({
         </div>
       </section>
 
-      {/* Edit Mode Panel */}
+      {/* Comprehensive Edit Mode Panel (100% of CV sections editable & deletable) */}
       {editing ? (
         <section className="mh-panel mh-edit-panel">
           <div className="mh-panel-title">
             <div>
-              <small className="eyebrow">INTERACTIVE CV EDITOR</small>
-              <h3>تحرير بيانات السيرة الذاتية بالكامل</h3>
+              <small className="eyebrow">FULL CV STUDIO · تعديل وحذف شامل</small>
+              <h3>تحرير كافة أقسام السيرة الذاتية (الخبرات، المؤهلات، الشهادات، المشاريع، المهارات)</h3>
             </div>
             {cv.hasCustomPdf && (
               <button type="button" className="sa-btn-subtle" onClick={handleResetPdf}>
@@ -387,11 +458,19 @@ export default function CvProfileView({
                 onChange={(e) => setDraft({ ...draft, fullNameEn: e.target.value })}
               />
             </label>
-            <label className="mh-span-2">
-              المسمى الوظيفي والتخصص
+            <label>
+              المسمى الوظيفي (عربي)
               <input
                 value={draft.jobTitleAr}
                 onChange={(e) => setDraft({ ...draft, jobTitleAr: e.target.value })}
+              />
+            </label>
+            <label>
+              المسمى الوظيفي (إنجليزي)
+              <input
+                dir="ltr"
+                value={draft.jobTitleEn}
+                onChange={(e) => setDraft({ ...draft, jobTitleEn: e.target.value })}
               />
             </label>
             <label>
@@ -421,25 +500,58 @@ export default function CvProfileView({
               سنوات الخبرة
               <input
                 value={draft.yearsExperience}
-                onChange={(e) => setDraft({ ...draft, yearsExperience: e.target.value })}
+                onChange={(e) =>
+                  setDraft({ ...draft, yearsExperience: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              الجنسية
+              <input
+                value={draft.nationality}
+                onChange={(e) =>
+                  setDraft({ ...draft, nationality: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              الحالة الاجتماعية
+              <input
+                value={draft.maritalStatus}
+                onChange={(e) =>
+                  setDraft({ ...draft, maritalStatus: e.target.value })
+                }
               />
             </label>
             <label className="mh-span-2">
-              الهدف المهني (Objective)
+              الهدف المهني (عربي)
               <textarea
                 rows={3}
                 value={draft.objectiveAr}
-                onChange={(e) => setDraft({ ...draft, objectiveAr: e.target.value })}
+                onChange={(e) =>
+                  setDraft({ ...draft, objectiveAr: e.target.value })
+                }
+              />
+            </label>
+            <label className="mh-span-2">
+              الهدف المهني (إنجليزي)
+              <textarea
+                rows={2}
+                dir="ltr"
+                value={draft.objectiveEn}
+                onChange={(e) =>
+                  setDraft({ ...draft, objectiveEn: e.target.value })
+                }
               />
             </label>
           </div>
 
-          {/* Edit Experiences */}
+          {/* 1. Edit Experiences + Highlights */}
           <div className="mh-edit-subsection">
             <div className="mh-subhead">
               <h4>الخبرات العملية ({draft.experiences.length})</h4>
-              <button type="button" className="sa-btn-subtle" onClick={addExperience}>
-                <Plus size={14} /> إضافة خبرة
+              <button type="button" className="sa-btn-subtle active" onClick={addExperience}>
+                <Plus size={14} /> إضافة خبرة جديدة
               </button>
             </div>
             <div className="mh-stack-sm">
@@ -502,7 +614,20 @@ export default function CvProfileView({
                         }}
                       />
                     </label>
-                    <div className="mh-row-end">
+                    <div className="mh-flex-between" style={{ alignItems: "flex-end" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <input
+                          type="checkbox"
+                          style={{ width: 16, height: 16, margin: 0 }}
+                          checked={Boolean(exp.current)}
+                          onChange={(e) => {
+                            const list = [...draft.experiences];
+                            list[idx] = { ...exp, current: e.target.checked };
+                            setDraft({ ...draft, experiences: list });
+                          }}
+                        />
+                        <span>الوظيفة الحالية</span>
+                      </label>
                       <button
                         type="button"
                         className="sa-delete-btn"
@@ -513,16 +638,320 @@ export default function CvProfileView({
                           })
                         }
                       >
-                        <Trash2 size={14} /> حذف
+                        <Trash2 size={14} /> حذف الخبرة
                       </button>
                     </div>
+                    <label className="mh-span-2">
+                      نقاط الخبرة التفصيلية (سطر لكل نقطة)
+                      <textarea
+                        rows={2}
+                        value={(exp.highlights || []).join("\n")}
+                        onChange={(e) => {
+                          const list = [...draft.experiences];
+                          list[idx] = {
+                            ...exp,
+                            highlights: e.target.value
+                              .split("\n")
+                              .map((s) => s.trim())
+                              .filter(Boolean),
+                          };
+                          setDraft({ ...draft, experiences: list });
+                        }}
+                      />
+                    </label>
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Edit Skills */}
+          {/* 2. Edit Education */}
+          <div className="mh-edit-subsection">
+            <div className="mh-subhead">
+              <h4>المؤهلات العلمية ({draft.education.length})</h4>
+              <button type="button" className="sa-btn-subtle active" onClick={addEducation}>
+                <Plus size={14} /> إضافة مؤهل علمي
+              </button>
+            </div>
+            <div className="mh-stack-sm">
+              {draft.education.map((edu, idx) => (
+                <div key={edu.id} className="mh-inset-card">
+                  <div className="mh-form-grid">
+                    <label>
+                      الجهة التعليمية (عربي)
+                      <input
+                        value={edu.institutionAr}
+                        onChange={(e) => {
+                          const list = [...draft.education];
+                          list[idx] = { ...edu, institutionAr: e.target.value };
+                          setDraft({ ...draft, education: list });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      الجهة التعليمية (إنجليزي)
+                      <input
+                        dir="ltr"
+                        value={edu.institutionEn}
+                        onChange={(e) => {
+                          const list = [...draft.education];
+                          list[idx] = { ...edu, institutionEn: e.target.value };
+                          setDraft({ ...draft, education: list });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      التخصص
+                      <input
+                        value={edu.major}
+                        onChange={(e) => {
+                          const list = [...draft.education];
+                          list[idx] = { ...edu, major: e.target.value };
+                          setDraft({ ...draft, education: list });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      سنة التخرج والتقدير
+                      <div className="sa-inline-inputs">
+                        <input
+                          placeholder="السنة"
+                          value={edu.year}
+                          onChange={(e) => {
+                            const list = [...draft.education];
+                            list[idx] = { ...edu, year: e.target.value };
+                            setDraft({ ...draft, education: list });
+                          }}
+                        />
+                        <input
+                          placeholder="التقدير"
+                          value={edu.grade}
+                          onChange={(e) => {
+                            const list = [...draft.education];
+                            list[idx] = { ...edu, grade: e.target.value };
+                            setDraft({ ...draft, education: list });
+                          }}
+                        />
+                      </div>
+                    </label>
+                  </div>
+                  <div className="mh-row-end" style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className="sa-delete-btn"
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          education: draft.education.filter((x) => x.id !== edu.id),
+                        })
+                      }
+                    >
+                      <Trash2 size={14} /> حذف المؤهل
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. Edit Certifications */}
+          <div className="mh-edit-subsection">
+            <div className="mh-subhead">
+              <h4>الشهادات والاعتمادات ({draft.certifications.length})</h4>
+              <button type="button" className="sa-btn-subtle active" onClick={addCertification}>
+                <Plus size={14} /> إضافة شهادة / اعتماد
+              </button>
+            </div>
+            <div className="mh-stack-sm">
+              {draft.certifications.map((cert, idx) => (
+                <div key={cert.id} className="mh-inset-card">
+                  <div className="mh-form-grid">
+                    <label>
+                      عنوان الشهادة / الاعتماد
+                      <input
+                        value={cert.title}
+                        onChange={(e) => {
+                          const list = [...draft.certifications];
+                          list[idx] = { ...cert, title: e.target.value };
+                          setDraft({ ...draft, certifications: list });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      الجهة المانحة
+                      <input
+                        value={cert.issuer}
+                        onChange={(e) => {
+                          const list = [...draft.certifications];
+                          list[idx] = { ...cert, issuer: e.target.value };
+                          setDraft({ ...draft, certifications: list });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      الفئة
+                      <input
+                        value={cert.category}
+                        onChange={(e) => {
+                          const list = [...draft.certifications];
+                          list[idx] = { ...cert, category: e.target.value };
+                          setDraft({ ...draft, certifications: list });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      السنة / الفترة
+                      <input
+                        value={cert.year}
+                        onChange={(e) => {
+                          const list = [...draft.certifications];
+                          list[idx] = { ...cert, year: e.target.value };
+                          setDraft({ ...draft, certifications: list });
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className="mh-row-end" style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className="sa-delete-btn"
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          certifications: draft.certifications.filter(
+                            (x) => x.id !== cert.id
+                          ),
+                        })
+                      }
+                    >
+                      <Trash2 size={14} /> حذف الشهادة
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 4. Edit CV Landmark Projects */}
+          <div className="mh-edit-subsection">
+            <div className="mh-subhead">
+              <h4>المشاريع الكبرى في السيرة الذاتية ({draft.cvProjects.length})</h4>
+              <button type="button" className="sa-btn-subtle active" onClick={addCvProject}>
+                <Plus size={14} /> إضافة مشروع بالسيرة
+              </button>
+            </div>
+            <div className="mh-stack-sm">
+              {draft.cvProjects.map((proj, idx) => (
+                <div key={proj.id} className="mh-inset-card">
+                  <div className="mh-form-grid">
+                    <label>
+                      اسم المشروع (عربي)
+                      <input
+                        value={proj.nameAr}
+                        onChange={(e) => {
+                          const list = [...draft.cvProjects];
+                          list[idx] = { ...proj, nameAr: e.target.value };
+                          setDraft({ ...draft, cvProjects: list });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      اسم المشروع (إنجليزي)
+                      <input
+                        dir="ltr"
+                        value={proj.nameEn}
+                        onChange={(e) => {
+                          const list = [...draft.cvProjects];
+                          list[idx] = { ...proj, nameEn: e.target.value };
+                          setDraft({ ...draft, cvProjects: list });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      العميل / الجهة
+                      <input
+                        value={proj.client}
+                        onChange={(e) => {
+                          const list = [...draft.cvProjects];
+                          list[idx] = { ...proj, client: e.target.value };
+                          setDraft({ ...draft, cvProjects: list });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      الموقع
+                      <input
+                        value={proj.location}
+                        onChange={(e) => {
+                          const list = [...draft.cvProjects];
+                          list[idx] = { ...proj, location: e.target.value };
+                          setDraft({ ...draft, cvProjects: list });
+                        }}
+                      />
+                    </label>
+                    <label className="mh-span-2">
+                      التخصص ونوع العمل
+                      <input
+                        value={proj.discipline}
+                        onChange={(e) => {
+                          const list = [...draft.cvProjects];
+                          list[idx] = { ...proj, discipline: e.target.value };
+                          setDraft({ ...draft, cvProjects: list });
+                        }}
+                      />
+                    </label>
+                    <label className="mh-span-2">
+                      نطاق العمل (Scope)
+                      <textarea
+                        rows={2}
+                        value={proj.scope}
+                        onChange={(e) => {
+                          const list = [...draft.cvProjects];
+                          list[idx] = { ...proj, scope: e.target.value };
+                          setDraft({ ...draft, cvProjects: list });
+                        }}
+                      />
+                    </label>
+                    <label className="mh-span-2">
+                      المواقع الفرعية (اختياري — موقع في كل سطر)
+                      <textarea
+                        rows={2}
+                        value={(proj.subLocations || []).join("\n")}
+                        onChange={(e) => {
+                          const list = [...draft.cvProjects];
+                          const subs = e.target.value
+                            .split("\n")
+                            .map((s) => s.trim())
+                            .filter(Boolean);
+                          list[idx] = {
+                            ...proj,
+                            subLocations: subs.length ? subs : undefined,
+                          };
+                          setDraft({ ...draft, cvProjects: list });
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className="mh-row-end" style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className="sa-delete-btn"
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          cvProjects: draft.cvProjects.filter((x) => x.id !== proj.id),
+                        })
+                      }
+                    >
+                      <Trash2 size={14} /> حذف المشروع من السيرة
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 5. Edit Skills */}
           <div className="mh-edit-subsection">
             <h4>المهارات التقنية والإشرافية ({draft.skills.length})</h4>
             <div className="mh-inline-add">
@@ -533,7 +962,9 @@ export default function CvProfileView({
               />
               <select
                 value={newSkillCat}
-                onChange={(e) => setNewSkillCat(e.target.value as CvSkill["category"])}
+                onChange={(e) =>
+                  setNewSkillCat(e.target.value as CvSkill["category"])
+                }
               >
                 <option value="CAD / BIM">CAD / BIM</option>
                 <option value="إشراف MEP">إشراف MEP</option>
@@ -554,8 +985,34 @@ export default function CvProfileView({
             </div>
             <div className="mh-chips-edit">
               {draft.skills.map((s, idx) => (
-                <div key={s.id} className="mh-skill-edit-row">
-                  <span>{s.name}</span>
+                <div key={s.id} className="mh-skill-edit-row" style={{ flexWrap: "wrap" }}>
+                  <input
+                    className="mh-select"
+                    style={{ flex: 1, minWidth: 160 }}
+                    value={s.name}
+                    onChange={(e) => {
+                      const list = [...draft.skills];
+                      list[idx] = { ...s, name: e.target.value };
+                      setDraft({ ...draft, skills: list });
+                    }}
+                  />
+                  <select
+                    className="mh-select"
+                    value={s.category}
+                    onChange={(e) => {
+                      const list = [...draft.skills];
+                      list[idx] = {
+                        ...s,
+                        category: e.target.value as CvSkill["category"],
+                      };
+                      setDraft({ ...draft, skills: list });
+                    }}
+                  >
+                    <option value="CAD / BIM">CAD / BIM</option>
+                    <option value="إشراف MEP">إشراف MEP</option>
+                    <option value="التشغيل والصيانة">التشغيل والصيانة</option>
+                    <option value="برامج مساعدة">برامج مساعدة</option>
+                  </select>
                   <input
                     type="range"
                     min={20}
@@ -585,20 +1042,24 @@ export default function CvProfileView({
             </div>
           </div>
 
-          {/* Edit Responsibilities */}
+          {/* 6. Edit Responsibilities */}
           <div className="mh-edit-subsection">
-            <h4>المهام والمسؤوليات</h4>
+            <h4>المهام والمسؤوليات ({draft.responsibilities.length})</h4>
             <div className="mh-inline-add">
               <input
                 placeholder="أضف مسؤولية مهنية جديدة..."
                 value={newResp}
                 onChange={(e) => setNewResp(e.target.value)}
               />
-              <button type="button" className="sa-btn-subtle active" onClick={addResponsibility}>
+              <button
+                type="button"
+                className="sa-btn-subtle active"
+                onClick={addResponsibility}
+              >
                 <Plus size={14} /> إضافة
               </button>
             </div>
-            <div className="mh-stack-sm">
+            <div className="mh-stack-sm" style={{ marginTop: 8 }}>
               {draft.responsibilities.map((resp, idx) => (
                 <div key={idx} className="mh-resp-edit-row">
                   <input
@@ -614,15 +1075,38 @@ export default function CvProfileView({
                     onClick={() =>
                       setDraft({
                         ...draft,
-                        responsibilities: draft.responsibilities.filter((_, i) => i !== idx),
+                        responsibilities: draft.responsibilities.filter(
+                          (_, i) => i !== idx
+                        ),
                       })
                     }
+                    title="حذف المسؤولية"
                   >
                     <Trash2 size={14} />
                   </button>
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="mh-flex-between" style={{ marginTop: 20 }}>
+            <button
+              type="button"
+              className="primary mh-btn-nomargin"
+              onClick={saveEdits}
+            >
+              <Check size={16} /> حفظ كافة تعديلات السيرة الذاتية
+            </button>
+            <button
+              type="button"
+              className="sa-btn-subtle"
+              onClick={() => {
+                setDraft(cv);
+                setEditing(false);
+              }}
+            >
+              إلغاء التعديلات
+            </button>
           </div>
         </section>
       ) : (
@@ -771,7 +1255,9 @@ export default function CvProfileView({
               <ul className="mh-resp-list">
                 {cv.responsibilities.map((r, i) => (
                   <li key={i}>
-                    <span className="mh-resp-num">{String(i + 1).padStart(2, "0")}</span>
+                    <span className="mh-resp-num">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
                     <span>{r}</span>
                   </li>
                 ))}
@@ -812,8 +1298,12 @@ export default function CvProfileView({
                           className="sa-btn-subtle"
                           onClick={() => setExpandedProject(open ? "" : p.id)}
                         >
-                          {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                          عرض المنشآت السبع ({p.subLocations!.length})
+                          {open ? (
+                            <ChevronUp size={14} />
+                          ) : (
+                            <ChevronDown size={14} />
+                          )}
+                          عرض المنشآت ({p.subLocations!.length})
                         </button>
                         {open && (
                           <ul className="mh-subloc-list">
@@ -832,40 +1322,20 @@ export default function CvProfileView({
         </>
       )}
 
-      {/* Embedded PDF Modal */}
-      {showPdfModal && (
-        <div className="overlay" onClick={() => setShowPdfModal(false)}>
-          <section
-            className="dialog sa-preview-dialog"
-            role="dialog"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sa-preview-header">
-              <div>
-                <small className="eyebrow">CURRICULUM VITAE · PDF</small>
-                <h2 style={{ margin: "2px 0 0", fontSize: 18 }}>{pdfLabel}</h2>
-              </div>
-              <div className="sa-preview-controls">
-                <a href={pdfUrl} download={pdfLabel} className="primary mh-btn-nomargin">
-                  <Download size={15} /> تنزيل PDF
-                </a>
-                <button
-                  type="button"
-                  className="sa-btn-subtle"
-                  onClick={() => setShowPdfModal(false)}
-                >
-                  <X size={16} /> إغلاق
-                </button>
-              </div>
-            </div>
-            <iframe
-              src={pdfUrl}
-              title="السيرة الذاتية PDF"
-              className="sa-pdf-frame"
-            />
-          </section>
-        </div>
-      )}
+      {/* Universal PDF Modal */}
+      <UniversalFilePreviewModal
+        target={
+          showPdfModal
+            ? {
+                name: pdfLabel,
+                blob: pdfBlob,
+                url: pdfBlob ? undefined : BUILTIN_CV_URL,
+                category: "السيرة الذاتية الرسمية",
+              }
+            : null
+        }
+        onClose={() => setShowPdfModal(false)}
+      />
     </div>
   );
 }

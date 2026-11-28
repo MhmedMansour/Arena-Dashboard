@@ -142,6 +142,7 @@ export const NAV_ICON_MAP: Record<string, LucideIcon> = {
 /** Curated selection shown in the icon picker (kept readable, engineering/dev themed). */
 export const NAV_ICON_OPTIONS: NavIconDef[] = [
   { name: "layout-dashboard", label: "لوحة تحكم", icon: LayoutDashboard },
+  { name: "calendar", label: "تقويم شهري", icon: Calendar },
   { name: "compass", label: "فرجار هندسي", icon: Compass },
   { name: "wrench", label: "صيانة وميكانيكا", icon: Wrench },
   { name: "zap", label: "كهرباء وطاقة", icon: Zap },
@@ -166,7 +167,6 @@ export const NAV_ICON_OPTIONS: NavIconDef[] = [
   { name: "file-text", label: "مستند", icon: FileText },
   { name: "file-spreadsheet", label: "جدول", icon: FileSpreadsheet },
   { name: "file-bar-chart", label: "تقرير", icon: FileBarChart },
-  { name: "calendar", label: "تقويم", icon: Calendar },
   { name: "list-todo", label: "مهام", icon: ListTodo },
   { name: "clipboard-list", label: "أوامر عمل", icon: ClipboardList },
   { name: "bar-chart-3", label: "إحصائيات", icon: BarChart3 },
@@ -193,9 +193,7 @@ export const NAV_ICON_OPTIONS: NavIconDef[] = [
   { name: "book-open", label: "دليل", icon: BookOpen },
   { name: "help-circle", label: "مساعدة", icon: HelpCircle },
   { name: "lightbulb", label: "فكرة", icon: Lightbulb },
-  { name: "sparkles", label: "ذكاء", icon: Sparkles },
-  { name: "bot", label: "مساعد ذكي", icon: Bot },
-  { name: "message-square", label: "محادثة", icon: MessageSquare },
+  { name: "sparkles", label: "تمييز", icon: Sparkles },
   { name: "code-2", label: "برمجة", icon: Code2 },
   { name: "rocket", label: "إطلاق", icon: Rocket },
   { name: "send", label: "إرسال", icon: Send },
@@ -206,11 +204,12 @@ export const NAV_ICON_OPTIONS: NavIconDef[] = [
 
 export const DEFAULT_TAB_ORDER: MainTabId[] = [
   "overview",
+  "calendar",
   "cv",
   "projects",
   "om",
-  "files",
   "samples",
+  "files",
   "certificates",
   "archive",
   "settings",
@@ -218,11 +217,12 @@ export const DEFAULT_TAB_ORDER: MainTabId[] = [
 
 export const DEFAULT_TAB_LABELS: Record<MainTabId, string> = {
   overview: "نظرة عامة",
+  calendar: "التقويم الشهري",
   cv: "السيرة الذاتية والخبرات",
   projects: "المشاريع",
   om: "التشغيل والصيانة",
-  files: "مكتبة الملفات",
   samples: "عينات الأعمال",
+  files: "مكتبة الملفات",
   certificates: "الشهادات",
   archive: "الأرشيف الذكي",
   settings: "الإعدادات والمزامنة",
@@ -230,11 +230,12 @@ export const DEFAULT_TAB_LABELS: Record<MainTabId, string> = {
 
 export const DEFAULT_TAB_ICONS: Record<MainTabId, NavIconName> = {
   overview: "layout-dashboard",
+  calendar: "calendar",
   cv: "user-check",
   projects: "folder-kanban",
   om: "wrench",
-  files: "files",
   samples: "images",
+  files: "files",
   certificates: "award",
   archive: "folder-archive",
   settings: "settings",
@@ -270,9 +271,10 @@ export function buildNavTabs(opts?: {
   }
   return order.map((id) => {
     const iconName = iconOverrides[id] ?? DEFAULT_TAB_ICONS[id];
+    const customLabel = labels[id]?.trim();
     return {
       id,
-      label: labels[id] ?? DEFAULT_TAB_LABELS[id],
+      label: customLabel ? customLabel : DEFAULT_TAB_LABELS[id],
       icon: resolveNavIcon(iconName),
       iconName,
     };

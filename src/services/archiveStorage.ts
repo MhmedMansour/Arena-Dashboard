@@ -294,16 +294,47 @@ export class IndexedDbArchiveStorage implements ArchiveStorageAdapter {
       const req = store.getAll();
       req.onsuccess = () => {
         const existing = (req.result as ArchiveFolder[]) || [];
-        if (existing.length === 0) {
+        let alreadySeeded = false;
+        try {
+          alreadySeeded = localStorage.getItem("mimar-archive-folders-seeded") === "1";
+        } catch {
+          alreadySeeded = false;
+        }
+        if (existing.length === 0 && !alreadySeeded) {
           for (const folder of DEFAULT_ARCHIVE_FOLDERS) {
             store.put(folder);
           }
+          try {
+            localStorage.setItem("mimar-archive-folders-seeded", "1");
+          } catch {
+            // ignore
+          }
           resolve([...DEFAULT_ARCHIVE_FOLDERS]);
         } else {
+          if (existing.length > 0 && !alreadySeeded) {
+            try {
+              localStorage.setItem("mimar-archive-folders-seeded", "1");
+            } catch {
+              // ignore
+            }
+          }
           resolve(existing.sort((a, b) => a.createdAt - b.createdAt));
         }
       };
       req.onerror = () => reject(req.error);
+    });
+  }
+
+  async restoreDefaultFolders(): Promise<void> {
+    const db = await openArchiveDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_FOLDERS, "readwrite");
+      const store = tx.objectStore(STORE_FOLDERS);
+      for (const folder of DEFAULT_ARCHIVE_FOLDERS) {
+        store.put(folder);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 

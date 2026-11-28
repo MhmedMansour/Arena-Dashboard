@@ -1,4 +1,5 @@
 import {
+  CalendarEventItem,
   CvProfileData,
   DashboardSettings,
   LibraryFileItem,
@@ -53,6 +54,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
     showStats: true,
     showQuickCvCard: true,
     showQuickOmCard: true,
+    showQuickCalendarCard: true,
     reduceMotion: false,
   },
   workspace: {
@@ -61,6 +63,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
     customDisciplines: DEFAULT_DISCIPLINES,
     navOrder: [...DEFAULT_TAB_ORDER],
     navIcons: {},
+    navLabels: {},
     navPosition: "right",
   },
 };
@@ -279,6 +282,7 @@ export const DEFAULT_CV_DATA: CvProfileData = {
       issuer: "المعهد الفني الصناعي (Industrial Technical Institute)",
       year: "2013",
       category: "مؤهل علمي",
+      selectedForDisplay: true,
     },
     {
       id: "cert-2",
@@ -286,6 +290,7 @@ export const DEFAULT_CV_DATA: CvProfileData = {
       issuer: "تطبيق عملي في مشاريع مستشفيات وجامعات وملاعب كبرى بالسعودية ومصر",
       year: "2009 - الآن",
       category: "تخصص CAD / BIM",
+      selectedForDisplay: true,
     },
     {
       id: "cert-3",
@@ -293,6 +298,7 @@ export const DEFAULT_CV_DATA: CvProfileData = {
       issuer: "خبرة ميدانية في أوامر العمل والصيانة الوقائية والتصحيحية",
       year: "2020 - الآن",
       category: "تشغيل وصيانة O&M",
+      selectedForDisplay: true,
     },
   ],
   customPdfName: "CV_2025120123283578.pdf",
@@ -310,6 +316,8 @@ export const DEFAULT_PROJECTS: ProjectItem[] = [
     discipline: "تكييف وكهرباء وسباكة",
     progress: 85,
     art: 1,
+    targetDate: "2026-11-30",
+    selectedForDisplay: true,
     notes: "مخططات Shop Drawings & As-Built وتنسيق خدمات MEP الحرجة.",
   },
   {
@@ -322,6 +330,8 @@ export const DEFAULT_PROJECTS: ProjectItem[] = [
     discipline: "كهرباء وشبكات وبنية تحتية",
     progress: 78,
     art: 3,
+    targetDate: "2026-12-10",
+    selectedForDisplay: true,
     notes: "تجهيز البنية التحتية الكهربائية والشبكات للصالات الخضراء والمدن الرياضية.",
   },
   {
@@ -334,6 +344,8 @@ export const DEFAULT_PROJECTS: ProjectItem[] = [
     discipline: "تشغيل وصيانة O&M",
     progress: 90,
     art: 3,
+    targetDate: "2026-11-28",
+    selectedForDisplay: true,
     notes: "إشراف تشغيل وصيانة وقائية وتصحيحية للأنظمة الكهروميكانيكية ومتابعة Maximo.",
   },
   {
@@ -346,6 +358,8 @@ export const DEFAULT_PROJECTS: ProjectItem[] = [
     discipline: "نمذجة وتنسيق MEP",
     progress: 100,
     art: 2,
+    targetDate: "2026-11-18",
+    selectedForDisplay: true,
     notes: "إعداد مخططات الأنظمة الميكانيكية والكهربائية والصحية.",
   },
   {
@@ -358,6 +372,8 @@ export const DEFAULT_PROJECTS: ProjectItem[] = [
     discipline: "تنفيذ ومخططات MEP",
     progress: 72,
     art: 1,
+    targetDate: "2026-12-15",
+    selectedForDisplay: true,
     notes: "تطوير ومراجعة المخططات التنفيذية وأعمال التكييف والكهرباء للمباني التعليمية.",
   },
   {
@@ -370,6 +386,8 @@ export const DEFAULT_PROJECTS: ProjectItem[] = [
     discipline: "HVAC ومكافحة حريق وكهرباء",
     progress: 100,
     art: 2,
+    targetDate: "2026-10-20",
+    selectedForDisplay: true,
     notes: "مخططات التكييف المركزي وتوزيع الإضاءة والإنذار لمجمع السينما.",
   },
   {
@@ -382,6 +400,8 @@ export const DEFAULT_PROJECTS: ProjectItem[] = [
     discipline: "كهرباء وميكانيكا",
     progress: 100,
     art: 1,
+    targetDate: "2026-10-12",
+    selectedForDisplay: false,
     notes: "مخططات تنفيذية ومراجعة أنظمة القوى والتكييف.",
   },
   {
@@ -394,6 +414,8 @@ export const DEFAULT_PROJECTS: ProjectItem[] = [
     discipline: "تشغيل وصيانة وتنفيذ",
     progress: 100,
     art: 3,
+    targetDate: "2026-11-10",
+    selectedForDisplay: false,
     notes: "أعمال الهناجر والتجهيزات الكهروميكانيكية بالخرج.",
   },
   {
@@ -406,6 +428,8 @@ export const DEFAULT_PROJECTS: ProjectItem[] = [
     discipline: "مخططات تنفيذية MEP",
     progress: 100,
     art: 2,
+    targetDate: "2026-11-05",
+    selectedForDisplay: false,
     notes: "توزيع التكييف والسباكة والإنارة واللوحات الكهربائية.",
   },
 ];
@@ -486,7 +510,11 @@ export const DEFAULT_SAMPLE_FILES: LibraryFileItem[] = [
     project: "",
     size: 129012,
     date: Date.now(),
+    dueDate: "2026-11-28",
     isBuiltinCv: true,
+    selectedForDisplay: true,
+    displayOrder: 0,
+    notes: "النسخة الرسمية الكاملة من السيرة الذاتية والخبرات الهندسية.",
   },
   {
     id: "s-0",
@@ -495,7 +523,11 @@ export const DEFAULT_SAMPLE_FILES: LibraryFileItem[] = [
     project: "prj-kfsh",
     size: 16975,
     date: Date.now() - 86400000 * 3,
+    dueDate: "2026-11-25",
     art: 1,
+    selectedForDisplay: true,
+    displayOrder: 1,
+    notes: "عينة لوحة Shop Drawing لتنسيق مجاري التكييف ومسارات القوى والإنارة.",
   },
   {
     id: "s-1",
@@ -504,16 +536,71 @@ export const DEFAULT_SAMPLE_FILES: LibraryFileItem[] = [
     project: "prj-safwa",
     size: 16975,
     date: Date.now() - 86400000 * 7,
+    dueDate: "2026-11-21",
     art: 2,
+    selectedForDisplay: true,
+    displayOrder: 2,
+    notes: "عينة تنسيق ثلاثي الأبعاد لخدمات الميكانيكا ومكافحة الحريق بدون تعارضات.",
   },
   {
     id: "s-2",
     name: "مخطط تشغيل وصيانة كهرباء وميكانيكا — وزارة الرياضة.svg",
-    cat: "التشغيل والصيانة",
+    cat: "عينات الأعمال",
     project: "prj-sport",
     size: 10617,
     date: Date.now() - 86400000 * 12,
+    dueDate: "2026-11-16",
     art: 3,
+    selectedForDisplay: false,
+    displayOrder: 3,
+    notes: "عينة مخطط غرف اللوحات الكهربائية ومسارات الشبكات (مخفية افتراضياً كمثال للتحكم بالعرض).",
+  },
+];
+
+export const DEFAULT_CALENDAR_EVENTS: CalendarEventItem[] = [
+  {
+    id: "cal-1",
+    title: "تسليم مخططات Shop Drawings لأنظمة التكييف والكهرباء",
+    date: "2026-11-28",
+    time: "10:30",
+    category: "تسليم مخططات CAD/BIM",
+    priority: "عاجل",
+    done: false,
+    projectId: "prj-kfsh",
+    notes: "مراجعة الطبقات والبلوكات قبل التسليم الرسمي للاستشاري.",
+  },
+  {
+    id: "cal-2",
+    title: "جولة فحص وصيانة شهرية للوحات MDB ووحدات التبريد",
+    date: "2026-11-29",
+    time: "09:00",
+    category: "تشغيل وصيانة دورية",
+    priority: "مرتفع",
+    done: false,
+    projectId: "prj-pnu",
+    notes: "توثيق قراءات الأمبير والحرارة وتحديث سجل Maximo الشهري.",
+  },
+  {
+    id: "cal-3",
+    title: "اجتماع تنسيق BIM وحل التعارضات مع المعماري والإنشائي",
+    date: "2026-11-24",
+    time: "13:00",
+    category: "اجتماع وتنسيق فني",
+    priority: "متوسط",
+    done: true,
+    projectId: "prj-safwa",
+    notes: "تم اعتماد مناسيب الأسقف المستعارة ومسارات الكابلات.",
+  },
+  {
+    id: "cal-4",
+    title: "معاينة واستلام تمديدات الشبكات والكهرباء الاحتياطية بالموقع",
+    date: "2026-12-03",
+    time: "11:00",
+    category: "معاينة واستلام موقع",
+    priority: "مرتفع",
+    done: false,
+    projectId: "prj-sport",
+    notes: "مطابقة التنفيذ مع مخططات As-Built المعتمدة.",
   },
 ];
 

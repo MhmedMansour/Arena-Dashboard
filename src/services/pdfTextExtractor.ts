@@ -3,11 +3,15 @@ import workerSource from "pdfjs-dist/build/pdf.worker.min.mjs?raw";
 
 // Bundle the worker with the single-file app: no CDN or external worker request.
 let workerUrl: string | undefined;
-export async function extractPdfText(file: File, maxChars: number): Promise<string | null> {
+export function ensurePdfWorker(): void {
   if (!workerUrl) {
     workerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
     GlobalWorkerOptions.workerSrc = workerUrl;
   }
+}
+
+export async function extractPdfText(file: File, maxChars: number): Promise<string | null> {
+  ensurePdfWorker();
   const task = getDocument({ data: new Uint8Array(await file.arrayBuffer()),
     useSystemFonts: true, stopAtErrors: true });
   const timeout = setTimeout(() => { void task.destroy(); }, 15000);

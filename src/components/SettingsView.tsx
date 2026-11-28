@@ -39,7 +39,6 @@ import {
 } from "../types/mhmed";
 import { DEFAULT_SETTINGS, THEME_PRESETS } from "../data/mhmedSeedData";
 import NavigationSettings from "./NavigationSettings";
-import AssistantSettings from "./AssistantSettings";
 import { BrandMark, ProfileAvatar } from "./ProfileAvatar";
 import {
   compressImageFile,
@@ -55,8 +54,7 @@ export type SettingsSubTab =
   | "profile"
   | "appearance"
   | "workspace"
-  | "sync"
-  | "assistant";
+  | "sync";
 
 interface SettingsViewProps {
   initialSection?: SettingsSubTab;
@@ -246,7 +244,6 @@ export default function SettingsView({
     { id: "profile", label: "البروفايل والصورة", icon: UserCircle2 },
     { id: "appearance", label: "المظهر والألوان", icon: Palette },
     { id: "workspace", label: "الأقسام والواجهة", icon: LayoutGrid },
-    { id: "assistant", label: "مساعد التطوير", icon: Sparkles },
     { id: "sync", label: "المزامنة والنسخ", icon: Cloud },
   ];
 
@@ -784,6 +781,16 @@ export default function SettingsView({
               />
             </label>
             <label className="mh-toggle-row">
+              <span>إظهار بطاقة التقويم الشهري السريع في الرئيسية</span>
+              <input
+                type="checkbox"
+                checked={settings.appearance.showQuickCalendarCard !== false}
+                onChange={(e) =>
+                  setAppearance({ showQuickCalendarCard: e.target.checked })
+                }
+              />
+            </label>
+            <label className="mh-toggle-row">
               <span>إظهار التاريخ في الشريط العلوي</span>
               <input
                 type="checkbox"
@@ -872,8 +879,6 @@ export default function SettingsView({
           </div>
         </section>
       )}
-
-      {subTab === "assistant" && <AssistantSettings onNotify={onNotify} />}
 
       {/* 5. CLOUD SYNC & BACKUP */}
       {subTab === "sync" && (
